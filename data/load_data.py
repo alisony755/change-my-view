@@ -4,6 +4,9 @@ unseen-topic test sets.
 
 Each pair is a post (history), two comments (human_ref_A, human_ref_B), and
 labels = 1 if comment A got more upvotes, else 0.
+
+# Note: if running this file prints "You are sending unauthenticated requests to the HF Hub",
+# run `hf auth login` once and enter the code given.
 """
 from collections import Counter
 
@@ -11,7 +14,12 @@ import nltk
 import pandas as pd
 from datasets import load_dataset
 
-nltk.download("punkt_tab", quiet=True)  # data files for nltk.word_tokenize
+# nltk.word_tokenize needs the punkt_tab data files. Download them only if they are missing,
+# because nltk.download checks the server every time it is called.
+try:
+    nltk.data.find("tokenizers/punkt_tab")
+except LookupError:
+    nltk.download("punkt_tab", quiet=True)
 
 DATASET_NAME = "stanfordnlp/SHP"
 MAIN_SUBREDDIT = "changemyview"
@@ -50,13 +58,15 @@ def cut_footer(post):
     """The post without the moderator footer at its end."""
     for footer in MOD_FOOTERS:
         post = post.split(footer)[0]
-    return post.rstrip(" _>*")  # the line and quote marks in front of the footer
+    post = post.replace("&gt;", ">")  # ">" is sometimes stored as the HTML code "&gt;"
+    return post.rstrip(" \n_>*")  # the line breaks, line and quote marks in front of the footer
 
 def is_bot_comment(comment):
     return BOT_COMMENT in comment[:80].lower().replace("*", "")
 
 def clean_pairs(pairs):
-    """Cuts the moderator footer off the posts and drops pairs where a comment is a moderator bot note."""
+    """Cuts the moderator footer off the posts and drops pairs 
+    where a comment is a moderator bot note."""
     pairs = pairs.assign(history=pairs["history"].map(cut_footer))
     is_bot = pairs["human_ref_A"].map(is_bot_comment) | pairs["human_ref_B"].map(is_bot_comment)
     return pairs[~is_bot]
@@ -145,8 +155,9 @@ def longer_won(pairs):
 if __name__ == "__main__":
     from transformers import AutoTokenizer  # slow import, only the report needs it
 
-    raw = load_cmv(filtered=False)
-    train, dev, test = load_cmv()
+    splits = load_subreddit(MAIN_SUBREDDIT)  # load once, then filter the same copy
+    raw = [splits[s] for s in ("train", "validation", "test")]
+    train, dev, test = [filter_pairs(pairs) for pairs in raw]
 
     # Sample counts and class distribution. "Longer wins" is the shortcut any model has to beat.
     print("Pairs per split")
@@ -160,8 +171,10 @@ if __name__ == "__main__":
     for name, n in [("comment", comments), ("post", posts)]:
         print(f"  {name}: mean {n.mean():.0f}, median {n.median():.0f}, max {n.max()}")
 
-    # RoBERTa can read 512 tokens, so this tells us how often we need to cut the input
+    # RoBERTa can read 512 tokens, so this tells us how often we need to cut the input.
+    # Tokenizing every pair one by one is slow, so we tokenize a 2,000-pair sample in one batch.
     tokenizer = AutoTokenizer.from_pretrained("roberta-base")
-    text = train["history"] + " " + train["human_ref_A"] + " " + train["human_ref_B"]
-    tokens = text.map(lambda t: len(tokenizer(t, add_special_tokens=False)["input_ids"]))
-    print(f"\nPost + both comments over 512 RoBERTa tokens (train): {(tokens > 512).mean():.1%}")
+    sample = train.sample(n=min(2000, len(train)), random_state=0)
+    text = sample["history"] + " " + sample["human_ref_A"] + " " + sample["human_ref_B"]
+    tokens = pd.Series([len(ids) for ids in tokenizer(list(text), add_special_tokens=False)["input_ids"]])
+    print(f"\nPost + both comments over 512 RoBERTa tokens (train sample): {(tokens > 512).mean():.1%}")
