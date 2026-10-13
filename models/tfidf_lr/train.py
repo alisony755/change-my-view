@@ -3,9 +3,11 @@ Each comment becomes a TF-IDF vector. A pair becomes one vector, TF-IDF(A) - TF-
 logistic regression predicts labels = 1 if comment A got more upvotes. The post is not used.
 Both TF-IDF and logistic regression are written with NumPy.
 """
+from collections import Counter
 import sys
 from pathlib import Path
 import numpy as np
+from scipy import sparse
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))  
 from data.load_data import load_training_data, pick_longer, tokenize
@@ -24,19 +26,35 @@ class Tfidf:
 
     def fit(self, texts):
         """Chooses the vocabulary and computes the IDF values. Use the training comments only."""
-        # TODO: tokenize each text, count in how many texts each word appears,
-        #       keep the words with at least MIN_DOC_FREQUENCY, store self.vocabulary and self.idf
-        raise NotImplementedError
+        texts = list(set(texts)) # each comment once
+        doc_frequency = Counter() # word -> # of comments that contain it
+        for text in texts:
+            doc_frequency.update(set(tokenize(text)))
+        kept = sorted(word for word, count in doc_frequency.items() if count >= MIN_DOC_FREQUENCY)
+        self.vocabulary = {word: index for index, word in enumerate(kept)} # word -> column number
+        self.idf = np.array([np.log(len(texts) / doc_frequency[word]) for word in kept])
 
     def transform(self, texts):
-        """One row per text, one column per vocabulary word."""
-        # TODO: count the words of each text and multiply by self.idf
-        raise NotImplementedError
-
+        """One row per text, one column per vocabulary word. Words outside of the vocabulary are ignored."""
+        rows, columns, values = [], [], []  # where each non-zero valur goes in the matrix
+        for row, text in enumerate(texts):
+            weights = {} # column number -> TF-IDF value, for this text
+            for word, count in Counter(tokenize(text)).items():
+                if word in self.vocabulary: # words outside the vocabulary are ignored
+                    column = self.vocabulary[word]
+                    weights[column] = count * self.idf[column]
+            # Scale the vector to length 1, so a long comment does not get bigger values
+            length = np.sqrt(sum(value ** 2 for value in weights.values()))
+            for column, value in weights.items():
+                rows.append(row)
+                columns.append(column)
+                values.append(value / length)
+        shape = (len(texts), len(self.vocabulary))
+        return sparse.csr_matrix((values, (rows, columns)), shape=shape)
+        
 def pair_features(tfidf, pairs):
     """TF-IDF(A) - TF-IDF(B). A positive value means the word is used more in comment A."""
-    # TODO: transform pairs["human_ref_A"] and pairs["human_ref_B"], return the difference
-    raise NotImplementedError
+    return tfidf.transform(list(pairs["human_ref_A"])) - tfidf.transform(list(pairs["human_ref_B"]))
 
 
 # Logistic regression
