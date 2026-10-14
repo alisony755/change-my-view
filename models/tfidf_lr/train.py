@@ -16,6 +16,7 @@ from data.load_data import load_training_data, pick_longer, tokenize
 MIN_DOC_FREQUENCY = 2  # a word must be in at least this many training comments to be a feature
 LEARNING_RATE = 1.0
 EPOCHS = 20
+BATCH_SIZE = 32        # number of pairs used for each weight update
 SEED = 0
 
 
@@ -57,21 +58,33 @@ def pair_features(tfidf, pairs):
     return tfidf.transform(list(pairs["human_ref_A"])) - tfidf.transform(list(pairs["human_ref_B"]))
 
 
-# Logistic regression
+# Logistic Regression (LR)
 
 class LogisticRegression:
-    """Binary logistic regression trained with stochastic gradient descent."""
+    """Binary LR trained with stochastic gradient descent."""
 
     def fit(self, features, labels):
         """Learns self.weights and self.bias."""
-        # TODO: start from zeros; for each epoch, shuffle, then update with the gradient
-        #       (predicted probability - true label) * feature value
-        raise NotImplementedError
+        random = np.random.default_rng(SEED)
+        labels = np.asarray(labels)
+        self.weights = np.zeros(features.shape[1])  # one weight per vocabulary word
+        self.bias = 0.0
+        order = list(range(features.shape[0]))  # the row numbers: 0, 1, 2, ...
+        for epoch in range(EPOCHS):
+            random.shuffle(order)  # visit the pairs in a new random order
+            for row in order:
+                pair = features[[row]]  # the features of one pair
+                # gradient of the cross-entropy loss: (predicted - true) * feature value
+                error = self.predict_probability(pair) - labels[row]
+                weight_gradient = pair.T @ error  # (predicted - true) * feature value, for every word
+                bias_gradient = error[0]          # (predicted - true), as if the bias's feature value were 1
+                self.weights = self.weights - LEARNING_RATE * weight_gradient
+                self.bias = self.bias - LEARNING_RATE * bias_gradient
 
     def predict_probability(self, features):
         """P(labels = 1), the probability that comment A wins."""
-        # TODO: sigmoid(features @ self.weights + self.bias)
-        raise NotImplementedError
+        scores = features @ self.weights + self.bias
+        return 1 / (1 + np.exp(-scores)) 
 
     def predict(self, features):
         return (self.predict_probability(features) >= 0.5).astype(int)
