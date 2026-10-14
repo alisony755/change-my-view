@@ -1,7 +1,7 @@
 """
 Each comment becomes a TF-IDF vector. A pair becomes one vector, TF-IDF(A) - TF-IDF(B), and
 logistic regression predicts labels = 1 if comment A got more upvotes. The post is not used.
-Both TF-IDF and logistic regression are written with NumPy.
+Both TF-IDF and logistic regression are written by hand with NumPy and SciPy.
 """
 from collections import Counter
 import random
@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 from scipy import sparse
 
-sys.path.append(str(Path(__file__).resolve().parents[2]))  
+sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
 from data.load_data import (length_ratio, load_seen_tests, load_training_data, load_unseen_tests,
                             pick_longer, tokenize)
 
@@ -19,6 +19,7 @@ MIN_DOC_FREQUENCY = 2  # a word must be in at least this many training comments 
 LEARNING_RATE = 0.01   # small, because the weights change after every single pair
 EPOCHS = 20
 SEED = 0
+REGULARIZATION = 0.001  # L2 strength; larger = smaller weights, less overfitting
 
 
 # TF-IDF features
@@ -38,7 +39,7 @@ class Tfidf:
 
     def transform(self, texts):
         """One row per text, one column per vocabulary word. Words outside of the vocabulary are ignored."""
-        rows, columns, values = [], [], []  # where each non-zero valur goes in the matrix
+        rows, columns, values = [], [], []  # where each non-zero value goes in the matrix
         for row, text in enumerate(texts):
             weights = {} # column number -> TF-IDF value, for this text
             for word, count in Counter(tokenize(text)).items():
@@ -61,31 +62,36 @@ def pair_features(tfidf, pairs):
 
 # Logistic Regression (LR)
 
+def sigmoid(scores):
+    """Turns a score into a probability between 0 and 1."""
+    return 1 / (1 + np.exp(-scores))
+
 class LogisticRegression:
-    """Binary LR trained with stochastic gradient descent."""
+    """Binary LR trained with stochastic gradient descent (SGD)."""
 
     def fit(self, features, labels):
-        """Learns self.weights and self.bias."""
-        random.seed(SEED)  # so every run shuffles the same way
+        """Learns self.weights and self.bias with stochastic gradient descent and L2 regularization."""
+        rng = random.Random(SEED)                # own random generator, so other code isn't affected
         labels = np.asarray(labels)
-        self.weights = np.zeros(features.shape[1])  # one weight per vocabulary word
+        self.weights = np.zeros(features.shape[1])
         self.bias = 0.0
-        order = list(range(features.shape[0]))  # the row numbers: 0, 1, 2, ...
+        order = list(range(features.shape[0]))
         for epoch in range(EPOCHS):
-            random.shuffle(order)  # visit the pairs in a new random order
+            rng.shuffle(order)
             for row in order:
-                pair = features[[row]]  # the features of one pair
-                # gradient of the cross-entropy loss: (predicted - true) * feature value
-                error = self.predict_probability(pair) - labels[row]
-                weight_gradient = pair.T @ error  # (predicted - true) * feature value, for every word
-                bias_gradient = error[0]          # (predicted - true), as if the bias's feature value were 1
-                self.weights = self.weights - LEARNING_RATE * weight_gradient
-                self.bias = self.bias - LEARNING_RATE * bias_gradient
+                start, end = features.indptr[row], features.indptr[row + 1]
+                words = features.indices[start:end]   # the words in this pair
+                values = features.data[start:end]     # their feature values
+                probability = sigmoid(values @ self.weights[words] + self.bias)
+                error = probability - labels[row]     # predicted - true
+                self.weights *= 1 - LEARNING_RATE * REGULARIZATION  # L2: shrink every weight a little
+                # gradient = error * feature value; only the words in this pair have a non-zero value
+                self.weights[words] -= LEARNING_RATE * error * values
+                self.bias -= LEARNING_RATE * error    # the bias is not regularized
 
     def predict_probability(self, features):
         """P(labels = 1), the probability that comment A wins."""
-        scores = features @ self.weights + self.bias
-        return 1 / (1 + np.exp(-scores)) 
+        return sigmoid(features @ self.weights + self.bias)
 
     def predict(self, features):
         return (self.predict_probability(features) >= 0.5).astype(int)
@@ -116,7 +122,8 @@ def top_words(model, tfidf, count=15):
 
 def compare_with_sklearn(model, train_features, train_labels, dev_features):
     """Trains scikit-learn's version of the same method and checks that it predicts like ours."""
-    # TODO: train sklearn's SGDClassifier(loss="log_loss") with the same learning rate and epochs,
+    # TODO: train sklearn's SGDClassifier(loss="log_loss", penalty="l2", alpha=REGULARIZATION,
+    #       learning_rate="constant", eta0=LEARNING_RATE, max_iter=EPOCHS, tol=None, random_state=SEED),
     #       print how often its dev predictions match ours
     raise NotImplementedError
 
@@ -141,4 +148,3 @@ if __name__ == "__main__":
             evaluate(f"Seen test ({name})", model, tfidf, pairs)
         for name, pairs in load_unseen_tests(columns_only=True).items():
             evaluate(f"Unseen test ({name})", model, tfidf, pairs)
-        pass
