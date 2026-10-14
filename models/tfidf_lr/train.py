@@ -4,19 +4,20 @@ logistic regression predicts labels = 1 if comment A got more upvotes. The post 
 Both TF-IDF and logistic regression are written with NumPy.
 """
 from collections import Counter
+import random
 import sys
 from pathlib import Path
 import numpy as np
 from scipy import sparse
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))  
-from data.load_data import load_training_data, pick_longer, tokenize
+from data.load_data import (length_ratio, load_seen_tests, load_training_data, load_unseen_tests,
+                            pick_longer, tokenize)
 
 # Settings to tune on the dev set
 MIN_DOC_FREQUENCY = 2  # a word must be in at least this many training comments to be a feature
-LEARNING_RATE = 1.0
+LEARNING_RATE = 0.01   # small, because the weights change after every single pair
 EPOCHS = 20
-BATCH_SIZE = 32        # number of pairs used for each weight update
 SEED = 0
 
 
@@ -65,7 +66,7 @@ class LogisticRegression:
 
     def fit(self, features, labels):
         """Learns self.weights and self.bias."""
-        random = np.random.default_rng(SEED)
+        random.seed(SEED)  # so every run shuffles the same way
         labels = np.asarray(labels)
         self.weights = np.zeros(features.shape[1])  # one weight per vocabulary word
         self.bias = 0.0
@@ -95,17 +96,49 @@ class LogisticRegression:
 def accuracy(predictions, labels):
     return float(np.mean(np.asarray(predictions) == np.asarray(labels)))
 
+def similar_length_accuracy(predictions, pairs, max_ratio=1.25):
+    """Accuracy on the pairs where the longer comment is less than 1.25x the shorter one.
+    There, picking the longer comment does not help, so the model has to use the words."""
+    # TODO: keep the pairs with length_ratio(pairs) < max_ratio, return accuracy on those only
+    raise NotImplementedError
+
+def evaluate(name, model, tfidf, pairs):
+    """Prints the model's accuracy next to the length baseline on one set of pairs."""
+    # TODO: predict with model.predict(pair_features(tfidf, pairs)), then print
+    #       accuracy, similar_length_accuracy, and accuracy of pick_longer(pairs)
+    raise NotImplementedError
+
+def top_words(model, tfidf, count=15):
+    """The words with the largest weights: what the model thinks helps or hurts a comment."""
+    # TODO: sort the columns by model.weights; print the words of the `count` largest
+    #       (help a comment win) and the `count` smallest (hurt a comment)
+    raise NotImplementedError
+
+def compare_with_sklearn(model, train_features, train_labels, dev_features):
+    """Trains scikit-learn's version of the same method and checks that it predicts like ours."""
+    # TODO: train sklearn's SGDClassifier(loss="log_loss") with the same learning rate and epochs,
+    #       print how often its dev predictions match ours
+    raise NotImplementedError
+
 
 if __name__ == "__main__":
     train, dev = load_training_data(columns_only=True)
     print(f"{len(train)} train pairs, {len(dev)} dev pairs")
-    print(f"Baseline, pick the longer comment (dev): {accuracy(pick_longer(dev), dev['labels']):.3f}")
 
     tfidf = Tfidf()
     tfidf.fit(list(train["human_ref_A"]) + list(train["human_ref_B"]))
+    train_features = pair_features(tfidf, train)
     model = LogisticRegression()
-    model.fit(pair_features(tfidf, train), train["labels"])
-    print(f"TF-IDF + LR (dev): {accuracy(model.predict(pair_features(tfidf, dev)), dev['labels']):.3f}")
+    model.fit(train_features, train["labels"])
 
-    # TODO : compare with scikit-learn, report on the seen and unseen test sets (final run only),
-    #             accuracy on similar-length pairs, top weighted words
+    evaluate("Dev (changemyview)", model, tfidf, dev)
+    top_words(model, tfidf)
+    compare_with_sklearn(model, train_features, train["labels"], pair_features(tfidf, dev))
+
+    # The test sets are for the final numbers only: run with --test once the settings are chosen
+    if "--test" in sys.argv:
+        for name, pairs in load_seen_tests(columns_only=True).items():
+            evaluate(f"Seen test ({name})", model, tfidf, pairs)
+        for name, pairs in load_unseen_tests(columns_only=True).items():
+            evaluate(f"Unseen test ({name})", model, tfidf, pairs)
+        pass
