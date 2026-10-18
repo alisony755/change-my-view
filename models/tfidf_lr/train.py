@@ -55,11 +55,15 @@ class Tfidf:
                     weights[column] = count * self.idf[column]
             # Scale the vector to length 1, so a long comment does not get bigger values
             length = np.sqrt(sum(value ** 2 for value in weights.values()))
-            for column, value in weights.items():
-                rows.append(row)
-                columns.append(column)
-                values.append(value / length)
-        shape = (len(texts), len(self.vocabulary))
+
+            # Skip normalization if this text has no nonzero TF-IDF values
+            if length > 0:
+                for column, value in weights.items():
+                    rows.append(row)
+                    columns.append(column)
+                    values.append(value / length)
+                    shape = (len(texts), len(self.vocabulary))
+                    
         return sparse.csr_matrix((values, (rows, columns)), shape=shape)
         
 def pair_features(tfidf, pairs):
@@ -156,7 +160,7 @@ def top_words(model, tfidf, count=15):
     order = np.argsort(model.weights)
 
     # Positive weights increase the predicted probability that comment A wins
-    print(f"Top {count} words favoring comment A:")
+    print(f"\nTop {count} words favoring comment A:")
     for index in order[-count:][::-1]:
         print(f"  {words[index]}: {model.weights[index]:.4f}")
 
