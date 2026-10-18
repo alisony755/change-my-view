@@ -15,6 +15,13 @@ automatically by the code (nothing to download by hand). We train on r/ChangeMyV
 other 17 subreddits are unseen-topic test sets. `data/load_data.py` cleans and filters the pairs:
 a score ratio of at least 2, and at most 5 pairs per post.
 
+Upvotes are not persuasion, so we also test on
+[Winning Arguments](https://convokit.cornell.edu/documentation/winning.html) (Tan et al., 2016):
+pairs of replies to the same r/ChangeMyView post where one earned a delta (it changed the poster's
+view). And since the longer comment wins about 70% of the time, `balance_length` keeps only pairs
+where it wins half the time, to train and test on what the comments say. See
+`data/dataset_stats.md`.
+
 ## Setup
 
 Python 3.12. From the repo root:
@@ -28,7 +35,7 @@ pip install -r requirements.txt
 ## Run
 
 ```bash
-python data/load_data.py         # data statistics
+python data/load_data.py         # data statistics, written to data/dataset_stats.md
 python models/tfidf_lr/train.py  # TF-IDF + logistic regression
 ```
 

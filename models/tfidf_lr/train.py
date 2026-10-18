@@ -1,7 +1,7 @@
 """
 Each comment becomes a TF-IDF vector. A pair becomes one vector, TF-IDF(A) - TF-IDF(B), and
-logistic regression predicts labels = 1 if comment A got more upvotes. The post is not used.
-Both TF-IDF and logistic regression are written by hand with NumPy and SciPy.
+logistic regression (LR) predicts labels = 1 if comment A got more upvotes. The post is not used.
+Both TF-IDF and LR are written by hand with NumPy and SciPy.
 """
 from collections import Counter
 import random
@@ -11,8 +11,9 @@ import numpy as np
 from scipy import sparse
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
-from data.load_data import (length_ratio, load_seen_tests, load_training_data, load_unseen_tests,
-                            pick_longer, tokenize)
+from data.load_data import (TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, length_ratio,
+                            load_test_sets, load_training_data, load_winning_args, pick_longer,
+                            tokenize)
 
 # Settings to tune on the dev set
 MIN_DOC_FREQUENCY = 2  # a word must be in at least this many training comments to be a feature
@@ -20,6 +21,12 @@ LEARNING_RATE = 0.01   # small, because the weights change after every single pa
 EPOCHS = 20
 SEED = 0
 REGULARIZATION = 0.001  # L2 strength; larger = smaller weights, less overfitting
+# Train only on pairs where the longer comment wins half the time, so the model cannot learn
+# "longer wins" and has to use the words. False trains on all pairs.
+LENGTH_BALANCED = True
+# Mark the words after a negation (think -> think_NEG in "don't think"), since TF-IDF cannot see
+# word order. In 5-fold cross-validation it was the only course method that helped (+1.3 points).
+MARK_NEGATION = True
 
 
 # TF-IDF features
@@ -32,7 +39,7 @@ class Tfidf:
         texts = list(set(texts)) # each comment once
         doc_frequency = Counter() # word -> # of comments that contain it
         for text in texts:
-            doc_frequency.update(set(tokenize(text)))
+            doc_frequency.update(set(tokenize(text, mark_negation=MARK_NEGATION)))
         kept = sorted(word for word, count in doc_frequency.items() if count >= MIN_DOC_FREQUENCY)
         self.vocabulary = {word: index for index, word in enumerate(kept)} # word -> column number
         self.idf = np.array([np.log(len(texts) / doc_frequency[word]) for word in kept])
@@ -42,7 +49,7 @@ class Tfidf:
         rows, columns, values = [], [], []  # where each non-zero value goes in the matrix
         for row, text in enumerate(texts):
             weights = {} # column number -> TF-IDF value, for this text
-            for word, count in Counter(tokenize(text)).items():
+            for word, count in Counter(tokenize(text, mark_negation=MARK_NEGATION)).items():
                 if word in self.vocabulary: # words outside the vocabulary are ignored
                     column = self.vocabulary[word]
                     weights[column] = count * self.idf[column]
@@ -60,7 +67,7 @@ def pair_features(tfidf, pairs):
     return tfidf.transform(list(pairs["human_ref_A"])) - tfidf.transform(list(pairs["human_ref_B"]))
 
 
-# Logistic Regression (LR)
+# LR
 
 def sigmoid(scores):
     """Turns a score into a probability between 0 and 1."""
@@ -129,10 +136,15 @@ def evaluate(name, model, tfidf, pairs):
     similar_accuracy = similar_length_accuracy(predictions, pairs)
     length_accuracy = accuracy(pick_longer(pairs), labels)
 
+    # Accuracy on the pairs where picking the longer comment scores 50%
+    balanced = pairs.index.get_indexer(balance_length(pairs).index)
+    balanced_accuracy = accuracy(predictions[balanced], labels[balanced])
+
     # Print metrics to compare performance
     print(f"{name}")
     print(f"Accuracy: {model_accuracy:.4f}")
     print(f"Similar-length accuracy: {similar_accuracy:.4f}")
+    print(f"Length-balanced accuracy: {balanced_accuracy:.4f} ({len(balanced)} pairs)")
     print(f"Length baseline accuracy: {length_accuracy:.4f}")
 
 def top_words(model, tfidf, count=15):
@@ -182,6 +194,8 @@ def compare_with_sklearn(model, train_features, train_labels, dev_features):
 
 if __name__ == "__main__":
     train, dev = load_training_data(columns_only=True)
+    if LENGTH_BALANCED:
+        train = balance_length(train)
     print(f"{len(train)} train pairs, {len(dev)} dev pairs")
 
     tfidf = Tfidf()
@@ -196,7 +210,9 @@ if __name__ == "__main__":
 
     # The test sets are for the final numbers only: run with --test once the settings are chosen
     if "--test" in sys.argv:
-        for name, pairs in load_seen_tests(columns_only=True).items():
+        for name, pairs in load_test_sets(TRAIN_SUBREDDITS, columns_only=True).items():
             evaluate(f"Seen test ({name})", model, tfidf, pairs)
-        for name, pairs in load_unseen_tests(columns_only=True).items():
+        for name, pairs in load_test_sets(UNSEEN_SUBREDDITS, columns_only=True).items():
             evaluate(f"Unseen test ({name})", model, tfidf, pairs)
+        # labels = 1 if comment A earned a delta: did the model learn persuasion, or only upvotes?
+        evaluate("Persuasion test (Winning Arguments)", model, tfidf, load_winning_args(columns_only=True))
