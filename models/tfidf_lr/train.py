@@ -105,27 +105,79 @@ def accuracy(predictions, labels):
 def similar_length_accuracy(predictions, pairs, max_ratio=1.25):
     """Accuracy on the pairs where the longer comment is less than 1.25x the shorter one.
     There, picking the longer comment does not help, so the model has to use the words."""
-    # TODO: keep the pairs with length_ratio(pairs) < max_ratio, return accuracy on those only
-    raise NotImplementedError
+    # Create mask (True for pairs with length ratio < max ratio)
+    mask = length_ratio(pairs) < max_ratio
+    
+    # Return NaN if there are no pairs that meet the length-ratio requirement
+    if not mask.any():
+        return float("nan")
+    
+    # Return accuracy for similar-length pairs
+    return accuracy(np.asarray(predictions)[mask.to_numpy()], 
+                    pairs["labels"].to_numpy()[mask.to_numpy()])
 
 def evaluate(name, model, tfidf, pairs):
     """Prints the model's accuracy next to the length baseline on one set of pairs."""
-    # TODO: predict with model.predict(pair_features(tfidf, pairs)), then print
-    #       accuracy, similar_length_accuracy, and accuracy of pick_longer(pairs)
-    raise NotImplementedError
+    # Convert each pair into TF-IDF(A) - TF-IDF(B), then predict which comment wins
+    predictions = model.predict(pair_features(tfidf, pairs))
+    
+    # Extract the actual labels (1 means A won, 0 means B won)
+    labels = pairs["labels"].to_numpy()
+
+    # Calculate accuracy, similar-length accuracy, and length baseline accuracy
+    model_accuracy = accuracy(predictions, labels)
+    similar_accuracy = similar_length_accuracy(predictions, pairs)
+    length_accuracy = accuracy(pick_longer(pairs), labels)
+
+    # Print metrics to compare performance
+    print(f"{name}")
+    print(f"Accuracy: {model_accuracy:.4f}")
+    print(f"Similar-length accuracy: {similar_accuracy:.4f}")
+    print(f"Length baseline accuracy: {length_accuracy:.4f}")
 
 def top_words(model, tfidf, count=15):
     """The words with the largest weights: what the model thinks helps or hurts a comment."""
-    # TODO: sort the columns by model.weights; print the words of the `count` largest
-    #       (help a comment win) and the `count` smallest (hurt a comment)
-    raise NotImplementedError
+    # Get vocabulary words in the same order as the columns of the TF-IDF feature matrix
+    words = np.array(list(tfidf.vocabulary.keys()))
+    
+    # Sort vocabulary indices from the smallest learned weight to the largest
+    order = np.argsort(model.weights)
+
+    # Positive weights increase the predicted probability that comment A wins
+    print(f"Top {count} words favoring comment A:")
+    for index in order[-count:][::-1]:
+        print(f"  {words[index]}: {model.weights[index]:.4f}")
+
+    # Negative weights decrease the probability that comment A wins, favoring comment B
+    print(f"\nTop {count} words favoring comment B:")
+    for index in order[:count]:
+        print(f"  {words[index]}: {model.weights[index]:.4f}")
 
 def compare_with_sklearn(model, train_features, train_labels, dev_features):
     """Trains scikit-learn's version of the same method and checks that it predicts like ours."""
-    # TODO: train sklearn's SGDClassifier(loss="log_loss", penalty="l2", alpha=REGULARIZATION,
-    #       learning_rate="constant", eta0=LEARNING_RATE, max_iter=EPOCHS, tol=None, random_state=SEED),
-    #       print how often its dev predictions match ours
-    raise NotImplementedError
+    from sklearn.linear_model import SGDClassifier
+
+    sklearn_model = SGDClassifier(
+        loss="log_loss",
+        penalty="l2",
+        alpha=REGULARIZATION,
+        learning_rate="constant",
+        eta0=LEARNING_RATE,
+        max_iter=EPOCHS,
+        tol=None,
+        random_state=SEED,
+    )
+    
+    # Train the model using the same features and training labels
+    sklearn_model.fit(train_features, np.asarray(train_labels))
+
+    # Get both models' predictions for the same development examples
+    our_predictions = model.predict(dev_features)
+    sklearn_predictions = sklearn_model.predict(dev_features)
+
+    # Calculate the fraction of dev examples where the models predict the same label
+    match_rate = np.mean(our_predictions == sklearn_predictions)
+    print(f"\nScikit-learn prediction agreement: {match_rate:.4f} ({match_rate:.1%})")
 
 
 if __name__ == "__main__":
