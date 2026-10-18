@@ -115,7 +115,13 @@ def load_unseen_tests(filtered=True, columns_only=False):
 def tokenize(text):
     """Lowercased NLTK tokens of a text (words and punctuation marks). TF-IDF and the BiLSTM
     both use this, so they see the same tokens."""
-    return nltk.word_tokenize(text.lower())
+    # Tokenize lowercased text
+    tokens = nltk.word_tokenize(text.lower())
+
+    # Remove punctuation that is less likely to carry meaning
+    formatting = {"*", ",", ":", "$", "'", "`", "``", "''", "(", ")", "{", "}", "[", "]", "-", 
+                  ";" "%"}
+    return [token for token in tokens if token not in formatting]
 
 def build_vocabulary(train, min_count=2, columns=TEXT_COLUMNS):
     """Maps each word seen at least min_count times in the training texts to an index.
