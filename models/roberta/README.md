@@ -24,9 +24,9 @@ how good that comment is as a reply to that post. To compare two comments, we sc
 separately and predict that comment A wins if score(A) > score(B).
 
 ```
-post + comment A ──► RoBERTa ──► score(A) ─┐
-                                           ├──► score(A) - score(B) ──► sigmoid ──► P(A wins)
-post + comment B ──► RoBERTa ──► score(B) ─┘
+post + comment A --> RoBERTa --> score(A) -+
+                                           +--> score(A) - score(B) --> sigmoid --> P(A wins)
+post + comment B --> RoBERTa --> score(B) -+
                   (same weights)
 ```
 
@@ -54,3 +54,36 @@ After every epoch, the full training state is saved to `resume_checkpoint/`, so 
 run can be continued with `--resume-training`. The best epoch is saved to `checkpoint/` when
 training finishes. When running `--test` the model will load from there. 
 
+# Testing
+
+Running with `--test` loads the saved model from `checkpoint/` (or uses the freshly trained one
+when combined with `--train`) and evaluates it on every evaluation set. ]
+
+Here is how you would run just the tests:
+```
+python models/roberta/train.py --test
+```
+
+## Evaluation sets
+
+| Set                                 | What it measures                                                                 |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| Dev (changemyview)                  | the set used to pick the best epoch, always printed, even without `--test`       |
+| Seen test (changemyview)            | held-out pairs from the subreddit the model was trained on                       |
+| Unseen test (one per subreddit)     | the other 17 SHP subreddits, never trained on, to see if the model generalizes   |
+| Persuasion test (Winning Arguments) | pairs where `labels = 1` if comment A's author earned a delta, not more upvotes |
+
+The persuasion test asks whether the model learned what makes an argument convincing, or only
+what gets upvoted. Posts that also appear in SHP are dropped from it, so the model has never
+seen them.
+
+## Metrics
+
+Each set prints three numbers:
+
+- **Accuracy**: how often the model picks the comment that actually won.
+- **Similar-length accuracy**: accuracy on only the pairs where the longer comment is less than
+  1.25x the length of the shorter one. Longer comments tend to win, so this checks that the model
+  is using the content of the comment and not just its length.
+- **Length baseline accuracy**: the accuracy of always picking the longer comment. The model
+  should beat this to be useful.
