@@ -71,7 +71,7 @@ python models/roberta/train.py --test
 | Dev (changemyview)                  | the set used to pick the best epoch, always printed, even without `--test`       |
 | Seen test (changemyview)            | held-out pairs from the subreddit the model was trained on                       |
 | Unseen test (one per subreddit)     | the other 17 SHP subreddits, never trained on, to see if the model generalizes   |
-| Persuasion test (Winning Arguments) | pairs where `labels = 1` if comment A's author earned a delta, not more upvotes |
+| Persuasion test (Winning Arguments) | pairs where `labels = 1` if comment A's author earned a delta, not more upvotes  |
 
 The persuasion test asks whether the model learned what makes an argument convincing, or only
 what gets upvoted. Posts that also appear in SHP are dropped from it, so the model has never
