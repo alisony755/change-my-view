@@ -30,6 +30,11 @@ MARK_NEGATION = True
 
 
 # TF-IDF features
+def tfidf_tokens(text):
+    """Return the original tokens plus adjacent bigrams for TF-IDF features."""
+    tokens = tokenize(text, mark_negation=MARK_NEGATION)
+    bigrams = [f"{tokens[i]} {tokens[i + 1]}" for i in range(len(tokens) - 1)]
+    return tokens + bigrams
 
 class Tfidf:
     """TF-IDF: (count of the word in the comment) * log(N / comments containing the word)."""
@@ -39,7 +44,11 @@ class Tfidf:
         texts = list(set(texts)) # each comment once
         doc_frequency = Counter() # word -> # of comments that contain it
         for text in texts:
-            doc_frequency.update(set(tokenize(text, mark_negation=MARK_NEGATION)))
+            doc_frequency.update(set(tfidf_tokens(text)))
+        
+        # Number of unique training comments containing each word
+        self.document_frequency = doc_frequency
+        
         kept = sorted(word for word, count in doc_frequency.items() if count >= MIN_DOC_FREQUENCY)
         self.vocabulary = {word: index for index, word in enumerate(kept)} # word -> column number
         self.idf = np.array([np.log(len(texts) / doc_frequency[word]) for word in kept])
@@ -49,7 +58,7 @@ class Tfidf:
         rows, columns, values = [], [], []  # where each non-zero value goes in the matrix
         for row, text in enumerate(texts):
             weights = {} # column number -> TF-IDF value, for this text
-            for word, count in Counter(tokenize(text, mark_negation=MARK_NEGATION)).items():
+            for word, count in Counter(tfidf_tokens(text)).items():
                 if word in self.vocabulary: # words outside the vocabulary are ignored
                     column = self.vocabulary[word]
                     weights[column] = count * self.idf[column]
@@ -74,7 +83,8 @@ def pair_features(tfidf, pairs):
 # LR
 
 def sigmoid(scores):
-    """Turns a score into a probability between 0 and 1."""
+    """Turns a score into a probability between 0 and 1 without overflowing for extreme values."""
+    scores = np.clip(scores, -500, 500)
     return 1 / (1 + np.exp(-scores))
 
 class LogisticRegression:
@@ -135,9 +145,13 @@ def evaluate(name, model, tfidf, pairs):
     # Extract the actual labels (1 means A won, 0 means B won)
     labels = pairs["labels"].to_numpy()
 
-    # Calculate accuracy, similar-length accuracy, and length baseline accuracy
+    # Accuracy on the full set
     model_accuracy = accuracy(predictions, labels)
+    
+    # Accuracy on pairs whose comment lengths are similar
     similar_accuracy = similar_length_accuracy(predictions, pairs)
+    
+    # Baseline accuracy that predicts the longer comment wins
     length_accuracy = accuracy(pick_longer(pairs), labels)
 
     # Accuracy on the pairs where picking the longer comment scores 50%
@@ -151,23 +165,29 @@ def evaluate(name, model, tfidf, pairs):
     print(f"Length-balanced accuracy: {balanced_accuracy:.4f} ({len(balanced)} pairs)")
     print(f"Length baseline accuracy: {length_accuracy:.4f}")
 
-def top_words(model, tfidf, count=15):
+def top_words(model, tfidf, count=15, min_frequency=20):
     """The words with the largest weights: what the model thinks helps or hurts a comment."""
     # Get vocabulary words in the same order as the columns of the TF-IDF feature matrix
     words = np.array(list(tfidf.vocabulary.keys()))
     
-    # Sort vocabulary indices from the smallest learned weight to the largest
-    order = np.argsort(model.weights)
+    # Calculate frequency of each word across training comments
+    word_frequencies = np.array([tfidf.document_frequency[word] for word in words])
+    
+    # Only compare words appearing in at least min_frequency unique comments
+    eligible_words = np.flatnonzero(word_frequencies >= min_frequency)
+    
+    # Sort the eligible words from smallest learned weight to the largest
+    order = eligible_words[np.argsort(model.weights[eligible_words])]
 
     # Positive weights increase the predicted probability that comment A wins
     print(f"\nTop {count} words favoring comment A:")
     for index in order[-count:][::-1]:
-        print(f"  {words[index]}: {model.weights[index]:.4f}")
+        print(f"    {words[index]}: {model.weights[index]:.4f} (in {word_frequencies[index]} comments)")
 
     # Negative weights decrease the probability that comment A wins, favoring comment B
     print(f"\nTop {count} words favoring comment B:")
     for index in order[:count]:
-        print(f"  {words[index]}: {model.weights[index]:.4f}")
+        print(f"    {words[index]}: {model.weights[index]:.4f} (in {word_frequencies[index]} comments)")
 
 def compare_with_sklearn(model, train_features, train_labels, dev_features):
     """Trains scikit-learn's version of the same method and checks that it predicts like ours."""
