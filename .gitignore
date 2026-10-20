@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Cache files for data
+data/cache/ 
+
+# Fine-tuned model weights
+models/roberta/checkpoint/
+models/roberta/resume_checkpoint/

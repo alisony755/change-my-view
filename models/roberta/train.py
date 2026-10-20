@@ -1,0 +1,273 @@
+"""
+Fine-tunes pretrained roberta-base as a comment scorer. The model reads a post and one comment
+and gives the comment a single score, the neural version of TF-IDF(A) - TF-IDF(B). A pair is
+predicted as labels = 1 (comment A got more upvotes) if score(A) > score(B). Training minimizes
+the loss of P(A wins) = sigmoid(score(A) - score(B)). The best epoch on the dev set is saved.
+The full training state is saved after every epoch, so an interrupted run can be continued.
+
+To run:
+    --train: train the model on the changemyview training pairs, save the best epoch to checkpoint/
+    --resume-training: continue an interrupted --train from the last completed epoch saved in
+        resume_checkpoint/ (use the same settings, including --quick or not)
+    --test: evaluate the model on the changemyview dev set, the seen test sets
+    --quick: use only a small random subset of the training and dev pairs, for quick experiments
+"""
+import copy
+import os
+import random
+import sys
+import time
+from pathlib import Path
+import numpy as np
+import torch
+import torch.nn.functional as F
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
+
+sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
+from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, length_ratio, load_test_sets, load_training_data, pick_longer, load_winning_args
+
+# Model settings.
+MODEL_NAME = "roberta-base"
+MAX_LENGTH = 512        # RoBERTa's limit; longer post + comment texts are cut
+BATCH_SIZE = 8          # pairs per step (each pair is two comments for the model)
+LEARNING_RATE = 2e-5    # small, because we only nudge the pretrained weights
+EPOCHS = 2
+WARMUP_FRACTION = 0.1   # the learning rate rises for this fraction of the steps, then falls to 0
+SEED = 0
+USE_POST = True         # False = score the comment alone, for the context-sensitivity experiment
+
+CHECKPOINT_DIR = Path(__file__).resolve().parent / "checkpoint"
+RESUME_PATH = Path(__file__).resolve().parent / "resume_checkpoint" / "training_state.pt"  # saved after every epoch, so --resume-training can continue
+QUICK_PAIRS = 64        # --quick uses this many train pairs and dev pairs
+
+
+# Setup
+
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+DEVICE = get_device()
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+def autocast():
+    """Mixed precision, only on CUDA. On other devices this does nothing."""
+    return torch.autocast(device_type="cuda", dtype=torch.float16, enabled=DEVICE.type == "cuda")
+
+def format_time(seconds):
+    """Seconds as a short duration: 45s, 30m43s or 1h02m03s."""
+    minutes, seconds = divmod(round(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s"
+    if minutes:
+        return f"{minutes}m{seconds:02d}s"
+    return f"{seconds}s"
+
+
+class RoBERTa:
+    """roberta-base as a comment scorer: score(post, comment) -> one number. A pair is predicted
+    as labels = 1 (comment A wins) if score(A) > score(B)."""
+
+    def __init__(self, source=MODEL_NAME):
+        """source is a Hugging Face model name or a directory written by save()."""
+        set_seed(SEED)
+        self.tokenizer = AutoTokenizer.from_pretrained(source)
+        self.model = AutoModelForSequenceClassification.from_pretrained(source, num_labels=1).to(DEVICE)
+
+    def encode(self, posts, comments):
+        """Turns (post, comment) text pairs into model inputs. The post is the context. If USE_POST
+        is False the comment is encoded alone."""
+        if USE_POST:
+            batch = self.tokenizer(list(posts), list(comments), truncation="longest_first",
+                                   max_length=MAX_LENGTH, padding=True, return_tensors="pt")
+        else:
+            batch = self.tokenizer(list(comments), truncation=True, max_length=MAX_LENGTH,
+                                   padding=True, return_tensors="pt")
+        return batch.to(DEVICE)
+
+    def score_pairs(self, pairs):
+        """(score_A, score_B) tensors for a batch of pairs. Both comments go through the model in
+        one batch."""
+        posts = list(pairs["history"])
+        comments = list(pairs["human_ref_A"]) + list(pairs["human_ref_B"])
+        with autocast():
+            scores = self.model(**self.encode(posts + posts, comments)).logits.squeeze(-1)
+        return scores[:len(pairs)].float(), scores[len(pairs):].float()
+
+    def fit(self, train, dev, epochs=EPOCHS, resume=False):
+        """Fine-tunes on the training pairs. Keeps the weights of the epoch with the best dev
+        accuracy (stored in self.best_accuracy) and loads them back into the model. The training
+        state is saved to RESUME_PATH after every epoch. If resume is True, the run continues
+        from the last saved epoch."""
+        steps_per_epoch = (len(train) + BATCH_SIZE - 1) // BATCH_SIZE
+        total_steps = epochs * steps_per_epoch
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=LEARNING_RATE)
+        scheduler = get_linear_schedule_with_warmup(optimizer, int(WARMUP_FRACTION * total_steps), total_steps)
+        scaler = torch.amp.GradScaler("cuda", enabled=DEVICE.type == "cuda")
+        rng = np.random.default_rng(SEED)
+        dev_labels = dev["labels"].to_numpy()
+
+        self.best_accuracy, best_weights = -1.0, None
+        start = 0
+        if resume:  # continue an interrupted run from the state saved after its last epoch
+            start, best_weights = self.load_training_state(len(train), epochs, optimizer, scheduler, scaler, rng)
+            print(f"Resuming from epoch {start + 1}/{epochs}")
+
+        for epoch in range(start, epochs):
+            epoch_start = time.perf_counter()
+            self.model.train()
+            order = rng.permutation(len(train))
+            total_loss = 0.0
+            for step in range(steps_per_epoch):
+                batch = train.iloc[order[step * BATCH_SIZE:(step + 1) * BATCH_SIZE]]
+                score_a, score_b = self.score_pairs(batch)
+                labels = torch.tensor(batch["labels"].to_numpy(), dtype=torch.float, device=DEVICE)
+                loss = F.binary_cross_entropy_with_logits(score_a - score_b, labels)
+
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+                scaler.step(optimizer)
+                scaler.update()
+                scheduler.step()
+                total_loss += loss.item()
+
+            dev_accuracy = accuracy(self.predict(dev), dev_labels)
+            print(f"Epoch {epoch + 1}/{epochs}: train loss {total_loss / steps_per_epoch:.4f}, "
+                  f"dev accuracy {dev_accuracy:.4f}, time {format_time(time.perf_counter() - epoch_start)}")
+            if dev_accuracy > self.best_accuracy:
+                self.best_accuracy = dev_accuracy
+                best_weights = copy.deepcopy({k: v.cpu() for k, v in self.model.state_dict().items()})  # best epoch so far
+
+            self.save_training_state(epoch + 1, len(train), epochs, optimizer, scheduler, scaler, rng,
+                                     best_weights)
+
+        self.model.load_state_dict(best_weights)
+
+    def save_training_state(self, epoch, train_pairs, epochs, optimizer, scheduler, scaler, rng, best_weights):
+        """Saves everything fit needs to continue after this epoch to RESUME_PATH: the weights,
+        the optimizer, scheduler and scaler, the random states, and the best epoch so far."""
+        RESUME_PATH.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = RESUME_PATH.with_suffix(".tmp")  # write there first, so a kill cannot corrupt the old state
+        torch.save({
+            "epoch": epoch, "epochs": epochs, "train_pairs": train_pairs,
+            "model": self.model.state_dict(), "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(), "scaler": scaler.state_dict(),
+            "rng": rng.bit_generator.state,
+            "best_accuracy": self.best_accuracy, "best_weights": best_weights,
+            "python_rng": random.getstate(), "numpy_rng": np.random.get_state(),
+            "torch_rng": torch.get_rng_state(),
+            "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        }, temp_path)
+        os.replace(temp_path, RESUME_PATH)
+
+    def load_training_state(self, train_pairs, epochs, optimizer, scheduler, scaler, rng):
+        """Loads the state written by save_training_state back into the model, optimizer,
+        scheduler, scaler and random states. Returns (number of finished epochs, best weights)."""
+        state = torch.load(RESUME_PATH, map_location=DEVICE, weights_only=False)
+        if state["train_pairs"] != train_pairs or state["epochs"] != epochs:
+            sys.exit(f"The saved state is from a run with {state['train_pairs']} train pairs and "
+                     f"{state['epochs']} epochs, not {train_pairs} and {epochs} (was it --quick?)")
+        self.model.load_state_dict(state["model"])
+        optimizer.load_state_dict(state["optimizer"])
+        scheduler.load_state_dict(state["scheduler"])
+        scaler.load_state_dict(state["scaler"])
+        rng.bit_generator.state = state["rng"]
+        self.best_accuracy = state["best_accuracy"]
+        random.setstate(state["python_rng"])
+        np.random.set_state(state["numpy_rng"])
+        torch.set_rng_state(state["torch_rng"].cpu())
+        if state["cuda_rng"] is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all([s.cpu() for s in state["cuda_rng"]])
+        best_weights = {k: v.cpu() for k, v in state["best_weights"].items()}  # map_location moved them
+        return state["epoch"], best_weights
+
+    def predict_probability(self, pairs):
+        """P(labels = 1), the probability that comment A wins."""
+        self.model.eval()
+        probabilities = []
+        with torch.no_grad():
+            for start in range(0, len(pairs), BATCH_SIZE):
+                score_a, score_b = self.score_pairs(pairs.iloc[start:start + BATCH_SIZE])
+                probabilities.append(torch.sigmoid(score_a - score_b).cpu().numpy())
+        return np.concatenate(probabilities)
+
+    def predict(self, pairs):
+        return (self.predict_probability(pairs) >= 0.5).astype(int)
+
+    def save(self, directory):
+        """Saves the model and the tokenizer, so they can be loaded again with from_pretrained."""
+        self.model.save_pretrained(directory)
+        self.tokenizer.save_pretrained(directory)
+
+
+# Evaluation
+
+def accuracy(predictions, labels):
+    return float(np.mean(np.asarray(predictions) == np.asarray(labels)))
+
+def similar_length_accuracy(predictions, pairs, max_ratio=1.25):
+    """Accuracy on the pairs where the longer comment is less than 1.25x the shorter one.
+    There, picking the longer comment does not help, so the model has to use the words."""
+    mask = length_ratio(pairs) < max_ratio
+    if not mask.any():
+        return float("nan")
+    return accuracy(np.asarray(predictions)[mask.to_numpy()],
+                    pairs["labels"].to_numpy()[mask.to_numpy()])
+
+def evaluate(name, model, pairs):
+    """Prints the model's accuracy next to the length baseline on one set of pairs."""
+    predictions = model.predict(pairs)
+    labels = pairs["labels"].to_numpy()
+
+    print(f"{name}")
+    print(f"Accuracy: {accuracy(predictions, labels):.4f}")
+    print(f"Similar-length accuracy: {similar_length_accuracy(predictions, pairs):.4f}")
+    print(f"Length baseline accuracy: {accuracy(pick_longer(pairs), labels):.4f}")
+
+
+if __name__ == "__main__":
+    resume = "--resume-training" in sys.argv
+    do_train, do_test = "--train" in sys.argv or resume, "--test" in sys.argv  # resuming means training
+    if not (do_train or do_test):
+        sys.exit("Pass --train, --resume-training, --test, or a combination")
+    if resume and not RESUME_PATH.exists():
+        sys.exit(f"No training state at {RESUME_PATH}. Run with --train first.")
+
+    train, dev = load_training_data(columns_only=True)
+    if "--quick" in sys.argv:  # random subsets, the same every run
+        train = train.sample(n=min(QUICK_PAIRS, len(train)), random_state=SEED)
+        dev = dev.sample(n=min(QUICK_PAIRS, len(dev)), random_state=SEED)
+    print(f"{len(train)} train pairs, {len(dev)} dev pairs, device {DEVICE}")
+
+    if do_train:
+        model = RoBERTa()
+        model.fit(train, dev, epochs=EPOCHS, resume=resume)
+        model.save(CHECKPOINT_DIR)
+        RESUME_PATH.unlink(missing_ok=True)  # the run is finished, so there is nothing to resume
+        print(f"Saved best epoch (dev accuracy {model.best_accuracy:.4f}) to {CHECKPOINT_DIR}")
+    else:
+        if not CHECKPOINT_DIR.exists():
+            sys.exit(f"No saved model at {CHECKPOINT_DIR}. Run with --train first.")
+        model = RoBERTa(CHECKPOINT_DIR)
+        print(f"Loaded saved model from {CHECKPOINT_DIR}")
+
+    evaluate("Dev (changemyview)", model, dev)
+
+    # The test sets are for the final numbers only: run with --test once the settings are chosen
+    if do_test:
+        for name, pairs in load_test_sets(TRAIN_SUBREDDITS, columns_only=True).items():
+            evaluate(f"Seen test ({name})", model, pairs)
+        for name, pairs in load_test_sets(UNSEEN_SUBREDDITS, columns_only=True).items():
+            evaluate(f"Unseen test ({name})", model, pairs)
+        # labels = 1 if comment A earned a delta: did the model learn persuasion, or only upvotes?
+        evaluate("Persuasion test (Winning Arguments)", model, load_winning_args(columns_only=True))

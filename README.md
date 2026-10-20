@@ -37,6 +37,7 @@ pip install -r requirements.txt
 ```bash
 python data/load_data.py         # data statistics, written to data/dataset_stats.md
 python models/tfidf_lr/train.py  # TF-IDF + logistic regression
+python models/roberta/train.py   # fine-tuned RoBERTa (more instructions in models/roberta/README.md)
 ```
 
 ## Layout
