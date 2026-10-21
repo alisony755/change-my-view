@@ -7,15 +7,14 @@ from pathlib import Path
 import pandas as pd
 from tokenizers import Tokenizer
 
-from load_data import (DEV_SHARE, LENGTH_RATIO_BINS, MAIN_SUBREDDIT, MAX_PAIRS_PER_POST,
-                       MIN_SCORE_RATIO, UNSEEN_SUBREDDITS, balance_length, clean_pairs,
-                       filter_pairs, length_ratio, load_subreddit, load_test_sets,
+from load_data import (DEV_SHARE, LENGTH_RATIO_BINS, LENGTH_RATIO_LABELS, MAIN_SUBREDDIT,
+                       MAX_PAIRS_PER_POST, MIN_SCORE_RATIO, UNSEEN_SUBREDDITS, balance_length,
+                       clean_pairs, filter_pairs, length_ratio, load_subreddit, load_test_sets,
                        load_winning_args, longer_won, pick_longer, words)
 
 REPORT_PATH = Path(__file__).with_name("dataset_stats.md")
 # The report's example pair: comments of almost equal length, so the length baseline can't help
 EXAMPLE_PAIR = ("j2dq5j9", "j2dtgrf")  # comment A and comment B, on post zzutiu
-LENGTH_RATIO_LABELS = ["1-1.25x", "1.25-1.5x", "1.5-2x", "2-3x", "3-5x", "5x+"]  # the LENGTH_RATIO_BINS
 
 def percent(value):
     return f"{value:.1%}"

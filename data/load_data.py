@@ -39,6 +39,7 @@ MAX_PAIRS_PER_POST = 5  # so a few huge threads don't dominate the data
 DEV_SHARE = 0.1  # share of the train posts moved to dev: SHP's dev split has only 177 r/ChangeMyView posts
 # How many times longer the longer comment is, in buckets. balance_length evens out each bucket.
 LENGTH_RATIO_BINS = [1, 1.25, 1.5, 2, 3, 5, float("inf")]
+LENGTH_RATIO_LABELS = ["1-1.25x", "1.25-1.5x", "1.5-2x", "2-3x", "3-5x", "5x+"]
 
 # The persuasion test set: Winning Arguments (Tan et al., 2016), from ConvoKit
 WINNING_ARGS_URL = ("https://zissou.infosci.cornell.edu/convokit/datasets/winning-args-corpus/"

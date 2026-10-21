@@ -7,6 +7,7 @@ Both TF-IDF and LR are written by hand with NumPy and SciPy.
 from collections import Counter
 import random
 import sys
+import time
 from pathlib import Path
 import nltk
 from nltk.corpus import stopwords
@@ -14,9 +15,11 @@ import numpy as np
 from scipy import sparse
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
-from data.load_data import (TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, length_ratio,
-                            load_test_sets, load_training_data, load_winning_args, pick_longer,
-                            tokenize, words)
+from data.load_data import (TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, load_test_sets,
+                            load_training_data, load_winning_args, tokenize, words)
+from results.metrics.accuracy import evaluate
+from results.metrics.cost import report_cost
+from results.metrics.length_independence import accuracy_by_length_ratio
 
 
 # TF-IDF
@@ -90,9 +93,8 @@ class Tfidf:
                     rows.append(row)
                     columns.append(column)
                     values.append(value / length)
-                    shape = (len(texts), len(self.vocabulary))
-                    
-        return sparse.csr_matrix((values, (rows, columns)), shape=shape)
+
+        return sparse.csr_matrix((values, (rows, columns)), shape=(len(texts), len(self.vocabulary)))
         
 def pair_features(tfidf, pairs):
     """TF-IDF(A) - TF-IDF(B), plus a last column for length: log(1 + words in A) - log(1 + words
@@ -150,52 +152,8 @@ class LogisticRegression:
         return (self.predict_probability(features) >= 0.5).astype(int)
 
 
-# Evaluation
-
-def accuracy(predictions, labels):
-    return float(np.mean(np.asarray(predictions) == np.asarray(labels)))
-
-def similar_length_accuracy(predictions, pairs, max_ratio=1.25):
-    """Accuracy on the pairs where the longer comment is less than 1.25x the shorter one.
-    There, picking the longer comment does not help, so the model has to use the words."""
-    # Create mask (True for pairs with length ratio < max ratio)
-    mask = length_ratio(pairs) < max_ratio
-    
-    # Return NaN if there are no pairs that meet the length-ratio requirement
-    if not mask.any():
-        return float("nan")
-    
-    # Return accuracy for similar-length pairs
-    return accuracy(np.asarray(predictions)[mask.to_numpy()], 
-                    pairs["labels"].to_numpy()[mask.to_numpy()])
-
-def evaluate(name, model, tfidf, pairs):
-    """Prints the model's accuracy next to the length baseline on one set of pairs."""
-    # Convert each pair into its features (see pair_features), then predict which comment wins
-    predictions = model.predict(pair_features(tfidf, pairs))
-    
-    # Extract the actual labels (1 means A won, 0 means B won)
-    labels = pairs["labels"].to_numpy()
-
-    # Accuracy on the full set
-    model_accuracy = accuracy(predictions, labels)
-    
-    # Accuracy on pairs whose comment lengths are similar
-    similar_accuracy = similar_length_accuracy(predictions, pairs)
-    
-    # Baseline accuracy that predicts the longer comment wins
-    length_accuracy = accuracy(pick_longer(pairs), labels)
-
-    # Accuracy on the pairs where picking the longer comment scores 50%
-    balanced = pairs.index.get_indexer(balance_length(pairs).index)
-    balanced_accuracy = accuracy(predictions[balanced], labels[balanced])
-
-    # Print metrics to compare performance
-    print(f"{name}")
-    print(f"Accuracy: {model_accuracy:.4f}")
-    print(f"Similar-length accuracy: {similar_accuracy:.4f}")
-    print(f"Length-balanced accuracy: {balanced_accuracy:.4f} ({len(balanced)} pairs)")
-    print(f"Length baseline accuracy: {length_accuracy:.4f}")
+# Evaluation: the parts only TF-IDF + LR has. Accuracy, length independence and cost are shared
+# by all models, in results/metrics/.
 
 def top_words(model, tfidf, count=15, min_frequency=20):
     """The words with the largest weights: what the model thinks helps or hurts a comment."""
@@ -253,22 +211,33 @@ if __name__ == "__main__":
     train, dev = load_training_data(columns_only=True)
     print(f"{len(train)} train pairs, {len(dev)} dev pairs")
 
+    start = time.perf_counter()
     tfidf = Tfidf()
     tfidf.fit(list(train["human_ref_A"]) + list(train["human_ref_B"]))
     train_features = pair_features(tfidf, train)
     model = LogisticRegression()
     model.fit(train_features, train["labels"])
+    report_cost(time.perf_counter() - start, len(model.weights) + 1)  # the weights and the bias
 
-    evaluate("Dev (changemyview)", model, tfidf, dev)
+    def predict(pairs):
+        return model.predict(pair_features(tfidf, pairs))
+
+    majority_label = int(train["labels"].mean() >= 0.5)  # the label more common in train
+    dev_features = pair_features(tfidf, dev)
+    dev_predictions = model.predict(dev_features)
+    evaluate("Dev (changemyview)", dev_predictions, dev, majority_label)
+    print("\nDev accuracy by length ratio")
+    print(accuracy_by_length_ratio(dev_predictions, dev).to_string(index=False, float_format="%.4f"))
     top_words(model, tfidf)
-    compare_with_sklearn(model, train_features, train["labels"], pair_features(tfidf, dev))
+    compare_with_sklearn(model, train_features, train["labels"], dev_features)
 
     # Pick the settings using the dev set only. When they are final, run once with --test to get
     # the numbers to report.
     if "--test" in sys.argv:
         for name, pairs in load_test_sets(TRAIN_SUBREDDITS, columns_only=True).items():
-            evaluate(f"Seen test ({name})", model, tfidf, pairs)
+            evaluate(f"Seen test ({name})", predict(pairs), pairs, majority_label)
         for name, pairs in load_test_sets(UNSEEN_SUBREDDITS, columns_only=True).items():
-            evaluate(f"Unseen test ({name})", model, tfidf, pairs)
+            evaluate(f"Unseen test ({name})", predict(pairs), pairs, majority_label)
         # labels = 1 if comment A earned a delta: did the model learn persuasion, or only upvotes?
-        evaluate("Persuasion test (Winning Arguments)", model, tfidf, load_winning_args(columns_only=True))
+        persuasion = load_winning_args(columns_only=True)
+        evaluate("Persuasion test (Winning Arguments)", predict(persuasion), persuasion, majority_label)
