@@ -29,6 +29,7 @@ from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, 
 from results.metrics.cost import report_cost
 from results.metrics.length_independence import accuracy_by_length_ratio
 from results.run_log import save_output
+from results.metrics.accuracy import accuracy, evaluate
 
 # Model settings.
 MODEL_NAME = "roberta-base"
@@ -218,35 +219,6 @@ class RoBERTa:
         self.tokenizer.save_pretrained(directory)
 
 
-# Evaluation
-
-def accuracy(predictions, labels):
-    return float(np.mean(np.asarray(predictions) == np.asarray(labels)))
-
-def similar_length_accuracy(predictions, pairs, max_ratio=1.25):
-    """Accuracy on the pairs where the longer comment is less than 1.25x the shorter one.
-    There, picking the longer comment does not help, so the model has to use the words."""
-    mask = length_ratio(pairs) < max_ratio
-    if not mask.any():
-        return float("nan")
-    return accuracy(np.asarray(predictions)[mask.to_numpy()],
-                    pairs["labels"].to_numpy()[mask.to_numpy()])
-
-def evaluate(name, model, pairs):
-    """Prints the model's accuracy next to the length baseline on one set of pairs."""
-    predictions = model.predict(pairs)
-    labels = pairs["labels"].to_numpy()
-
-    # Accuracy on the pairs where picking the longer comment scores 50%
-    balanced = pairs.index.get_indexer(balance_length(pairs).index)
-    balanced_accuracy = accuracy(predictions[balanced], labels[balanced])
-
-    print(f"{name}")
-    print(f"Accuracy: {accuracy(predictions, labels):.4f}")
-    print(f"Similar-length accuracy: {similar_length_accuracy(predictions, pairs):.4f}")
-    print(f"Length-balanced accuracy: {balanced_accuracy:.4f} ({len(balanced)} pairs)")
-    print(f"Length baseline accuracy: {accuracy(pick_longer(pairs), labels):.4f}")
-
 
 if __name__ == "__main__":
     resume = "--resume-training" in sys.argv
@@ -255,17 +227,17 @@ if __name__ == "__main__":
         sys.exit("Pass --train, --resume-training, --test, or a combination")
     if resume and not RESUME_PATH.exists():
         sys.exit(f"No training state at {RESUME_PATH}. Run with --train first.")
+    if "--quick" not in sys.argv:  # save everything printed from here on to results/logs/roberta.txt
+        save_output("roberta")
 
     train, dev = load_training_data(columns_only=True)
+    majority_label = int(train["labels"].mean() >= 0.5)  # taken before balancing, so the baseline matches the other models
     if LENGTH_BALANCED:
         train = balance_length(train)
     if "--quick" in sys.argv:  # random subsets, the same every run
         train = train.sample(n=min(QUICK_PAIRS, len(train)), random_state=SEED)
         dev = dev.sample(n=min(QUICK_PAIRS, len(dev)), random_state=SEED)
-    else:
-        save_output("roberta")
     print(f"{len(train)} train pairs, {len(dev)} dev pairs, device {DEVICE}")
-
 
     if do_train:
         start = time.perf_counter()
@@ -282,15 +254,16 @@ if __name__ == "__main__":
         print(f"Loaded saved model from {CHECKPOINT_DIR}")
 
     dev_predictions = model.predict(dev)
-    evaluate("Dev (changemyview)", model, dev)
+    evaluate("Dev (changemyview)", dev_predictions, dev, majority_label)
     print("\nDev accuracy by length ratio")
     print(accuracy_by_length_ratio(dev_predictions, dev).to_string(index=False, float_format="%.4f"))
 
     # The test sets are for the final numbers only: run with --test once the settings are chosen
     if do_test:
         for name, pairs in load_test_sets(TRAIN_SUBREDDITS, columns_only=True).items():
-            evaluate(f"Seen test ({name})", model, pairs)
+            evaluate(f"Seen test ({name})", model.predict(pairs), pairs, majority_label)
         for name, pairs in load_test_sets(UNSEEN_SUBREDDITS, columns_only=True).items():
-            evaluate(f"Unseen test ({name})", model, pairs)
+            evaluate(f"Unseen test ({name})", model.predict(pairs), pairs, majority_label)
         # labels = 1 if comment A earned a delta: did the model learn persuasion, or only upvotes?
-        evaluate("Persuasion test (Winning Arguments)", model, load_winning_args(columns_only=True))
+        persuasion = load_winning_args(columns_only=True)
+        evaluate("Persuasion test (Winning Arguments)", model.predict(persuasion), persuasion, majority_label)
