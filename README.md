@@ -39,6 +39,7 @@ pip install -r requirements.txt
 python data/report.py            # data statistics, written to data/dataset_stats.md
 python models/tfidf_lr/train.py  # TF-IDF + logistic regression
 python models/roberta/train.py   # fine-tuned RoBERTa (more instructions in models/roberta/README.md)
+python models/bilstm/train.py  # BILSTM
 ```
 
 ## Layout
@@ -49,5 +50,3 @@ data/report.py       the data statistics in data/dataset_stats.md
 models/              one folder per model: tfidf_lr, bilstm, roberta
 results/             evaluation code and plots
 ```
-
-
