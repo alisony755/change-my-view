@@ -22,6 +22,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
+from tqdm.auto import tqdm
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
 from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, length_ratio, load_test_sets, load_training_data, pick_longer, load_winning_args
@@ -33,7 +34,7 @@ POST_TOKENS = 128       # post is cut to this many tokens (comment gets the rest
 BATCH_SIZE = 8          # pairs per step (each pair is two comments for the model)
 EVAL_BATCH_SIZE = 32    # no gradients at eval time, so bigger batches fit
 LEARNING_RATE = 2e-5    # small, because we only nudge the pretrained weights
-EPOCHS = 2
+EPOCHS = 5
 WARMUP_FRACTION = 0.1   # the learning rate rises for this fraction of the steps, then falls to 0
 SEED = 0
 USE_POST = True         # False = score the comment alone, for the context-sensitivity experiment
@@ -134,6 +135,7 @@ class RoBERTa:
         scaler = torch.amp.GradScaler("cuda", enabled=DEVICE.type == "cuda" and not USE_BF16)  # bf16 doesn't need scaling
         rng = np.random.default_rng(SEED)
         dev_labels = dev["labels"].to_numpy()
+        balanced_rows = dev.index.isin(balance_length(dev).index)  # dev pairs where length doesn't help
 
         self.best_accuracy, best_weights = -1.0, None
         start = 0
@@ -153,7 +155,9 @@ class RoBERTa:
             batches = [order[i:i + BATCH_SIZE] for i in range(0, len(order), BATCH_SIZE)]
             rng.shuffle(batches)
             total_loss = 0.0
-            for step, idx in enumerate(batches):
+            progress = tqdm(batches, desc=f"Epoch {epoch + 1}/{epochs}", unit="step")
+            
+            for step, idx in enumerate(progress):
                 batch = train.iloc[idx]
                 score_a, score_b = self.score_pairs(batch)
                 labels = torch.tensor(batch["labels"].to_numpy(), dtype=torch.float, device=DEVICE)
@@ -168,17 +172,17 @@ class RoBERTa:
                 scheduler.step()
                 total_loss += loss.item()
                 
-                if (step + 1) % 50 == 0:   # progress every 50 steps
-                    elapsed = time.perf_counter() - epoch_start
-                    left = elapsed / (step + 1) * (steps_per_epoch - step - 1)
-                    print(f"  step {step + 1}/{steps_per_epoch}, loss {total_loss / (step + 1):.4f}, "
-                          f"{format_time(elapsed)} elapsed, ~{format_time(left)} left", flush=True)
+                progress.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
 
-            dev_accuracy = accuracy(self.predict(dev), dev_labels)
+            predictions = self.predict(dev)
+            dev_accuracy = accuracy(predictions, dev_labels)
+            balanced_accuracy = accuracy(predictions[balanced_rows], dev_labels[balanced_rows])
             print(f"Epoch {epoch + 1}/{epochs}: train loss {total_loss / steps_per_epoch:.4f}, "
-                  f"dev accuracy {dev_accuracy:.4f}, time {format_time(time.perf_counter() - epoch_start)}")
-            if dev_accuracy > self.best_accuracy:
-                self.best_accuracy = dev_accuracy
+                  f"dev accuracy {dev_accuracy:.4f}, length-balanced {balanced_accuracy:.4f}, "
+                  f"time {format_time(time.perf_counter() - epoch_start)}")
+           
+            if balanced_accuracy > self.best_accuracy:  # select on what the comments say, not length
+                self.best_accuracy = balanced_accuracy
                 best_weights = copy.deepcopy({k: v.cpu() for k, v in self.model.state_dict().items()})  # best epoch so far
 
             self.save_training_state(epoch + 1, len(train), epochs, optimizer, scheduler, scaler, rng,
@@ -230,7 +234,7 @@ class RoBERTa:
         order = np.argsort(pairs["n_tokens"].to_numpy())
         probabilities = np.empty(len(pairs))
         with torch.inference_mode():
-            for start in range(0, len(pairs), EVAL_BATCH_SIZE):
+            for start in tqdm(range(0, len(pairs), EVAL_BATCH_SIZE), desc="Scoring", leave=False):
                 idx = order[start:start + EVAL_BATCH_SIZE]
                 score_a, score_b = self.score_pairs(pairs.iloc[idx])
                 probabilities[idx] = torch.sigmoid(score_a - score_b).cpu().numpy()
