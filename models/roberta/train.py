@@ -22,6 +22,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
+from tqdm.auto import tqdm
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
 from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, length_ratio, load_test_sets, load_training_data, pick_longer, load_winning_args
@@ -37,10 +38,12 @@ from results.metrics.generalization import generalization_report
 
 # Model settings.
 MODEL_NAME = "roberta-base"
-MAX_LENGTH = 512        # RoBERTa's limit; longer post + comment texts are cut
+MAX_LENGTH = 384        # RoBERTa's limit; longer post + comment texts are cut
+POST_TOKENS = 128       # post is cut to this many tokens (comment gets the rest_
 BATCH_SIZE = 8          # pairs per step (each pair is two comments for the model)
+EVAL_BATCH_SIZE = 32    # no gradients at eval time, so bigger batches fit
 LEARNING_RATE = 2e-5    # small, because we only nudge the pretrained weights
-EPOCHS = 2
+EPOCHS = 5
 WARMUP_FRACTION = 0.1   # the learning rate rises for this fraction of the steps, then falls to 0
 SEED = 0
 USE_POST = True         # False = score the comment alone, for the context-sensitivity experiment
@@ -66,14 +69,21 @@ def get_device():
 
 DEVICE = get_device()
 
+if DEVICE.type == "cuda":
+    torch.backends.cuda.matmul.allow_tf32 = True   # faster matmuls on Ampere+ GPUs
+    torch.backends.cudnn.allow_tf32 = True
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+USE_BF16 = DEVICE.type == "cuda" and torch.cuda.is_bf16_supported(including_emulation=False)
+
 def autocast():
     """Mixed precision, only on CUDA. On other devices this does nothing."""
-    return torch.autocast(device_type="cuda", dtype=torch.float16, enabled=DEVICE.type == "cuda")
+    dtype = torch.bfloat16 if USE_BF16 else torch.float16
+    return torch.autocast(device_type="cuda", dtype=dtype, enabled=DEVICE.type == "cuda")
 
 def format_time(seconds):
     """Seconds as a short duration: 45s, 30m43s or 1h02m03s."""
@@ -96,24 +106,30 @@ class RoBERTa:
         self.tokenizer = AutoTokenizer.from_pretrained(source)
         self.model = AutoModelForSequenceClassification.from_pretrained(source, num_labels=1).to(DEVICE)
 
-    def encode(self, posts, comments):
-        """Turns (post, comment) text pairs into model inputs. The post is the context. If USE_POST
-        is False the comment is encoded alone."""
-        if USE_POST:
-            batch = self.tokenizer(list(posts), list(comments), truncation="longest_first",
-                                   max_length=MAX_LENGTH, padding=True, return_tensors="pt")
-        else:
-            batch = self.tokenizer(list(comments), truncation=True, max_length=MAX_LENGTH,
-                                   padding=True, return_tensors="pt")
-        return batch.to(DEVICE)
+    def pretokenize(self, df):
+        """Tokenizes each (post, comment) input into ids_A and ids_B, giving the post up to POST_TOKENS 
+        and the comment the rest. n_tokens is the longer input's length, used to group batches."""
+        tok = self.tokenizer
+        df = df.copy()
+        post = tok(list(df["history"]), add_special_tokens=False, truncation=True,
+                   max_length=POST_TOKENS)["input_ids"]
+        budget = MAX_LENGTH - (POST_TOKENS if USE_POST else 0) - 4   # <s> post </s></s> comment </s>
+        for side in "AB":
+            com = tok(list(df[f"human_ref_{side}"]), add_special_tokens=False, truncation=True,
+                      max_length=budget)["input_ids"]
+            cls, sep = tok.cls_token_id, tok.sep_token_id  # <s> and </s>
+            df[f"ids_{side}"] = [[cls] + p + [sep, sep] + c + [sep] if USE_POST else [cls] + c + [sep]
+                                 for p, c in zip(post, com)]
+        df["n_tokens"] = [max(len(a), len(b)) for a, b in zip(df["ids_A"], df["ids_B"])]
+        return df
 
     def score_pairs(self, pairs):
-        """(score_A, score_B) tensors for a batch of pairs. Both comments go through the model in
-        one batch."""
-        posts = list(pairs["history"])
-        comments = list(pairs["human_ref_A"]) + list(pairs["human_ref_B"])
+        """(score_A, score_B) tensors for a batch of pretokenized pairs. Both comments go through
+        the model in one batch."""
+        ids = list(pairs["ids_A"]) + list(pairs["ids_B"])
+        batch = self.tokenizer.pad({"input_ids": ids}, return_tensors="pt").to(DEVICE)
         with autocast():
-            scores = self.model(**self.encode(posts + posts, comments)).logits.squeeze(-1)
+            scores = self.model(**batch).logits.squeeze(-1)
         return scores[:len(pairs)].float(), scores[len(pairs):].float()
 
     def fit(self, train, dev, epochs=EPOCHS, resume=False):
@@ -123,11 +139,13 @@ class RoBERTa:
         from the last saved epoch."""
         steps_per_epoch = (len(train) + BATCH_SIZE - 1) // BATCH_SIZE
         total_steps = epochs * steps_per_epoch
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=LEARNING_RATE)
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=LEARNING_RATE,
+                                      fused=DEVICE.type == "cuda")
         scheduler = get_linear_schedule_with_warmup(optimizer, int(WARMUP_FRACTION * total_steps), total_steps)
-        scaler = torch.amp.GradScaler("cuda", enabled=DEVICE.type == "cuda")
+        scaler = torch.amp.GradScaler("cuda", enabled=DEVICE.type == "cuda" and not USE_BF16)  # bf16 doesn't need scaling
         rng = np.random.default_rng(SEED)
         dev_labels = dev["labels"].to_numpy()
+        balanced_rows = dev.index.isin(balance_length(dev).index)  # dev pairs where length doesn't help
 
         self.best_accuracy, best_weights = -1.0, None
         start = 0
@@ -138,10 +156,19 @@ class RoBERTa:
         for epoch in range(start, epochs):
             epoch_start = time.perf_counter()
             self.model.train()
+            
+            # Group pairs of similar length into batches, in random batch order
             order = rng.permutation(len(train))
+            lengths = train["n_tokens"].to_numpy()
+            chunks = np.array_split(order, max(1, len(order) // (BATCH_SIZE * 50)))
+            order = np.concatenate([c[np.argsort(lengths[c])] for c in chunks])
+            batches = [order[i:i + BATCH_SIZE] for i in range(0, len(order), BATCH_SIZE)]
+            rng.shuffle(batches)
             total_loss = 0.0
-            for step in range(steps_per_epoch):
-                batch = train.iloc[order[step * BATCH_SIZE:(step + 1) * BATCH_SIZE]]
+            progress = tqdm(batches, desc=f"Epoch {epoch + 1}/{epochs}", unit="step")
+            
+            for step, idx in enumerate(progress):
+                batch = train.iloc[idx]
                 score_a, score_b = self.score_pairs(batch)
                 labels = torch.tensor(batch["labels"].to_numpy(), dtype=torch.float, device=DEVICE)
                 loss = F.binary_cross_entropy_with_logits(score_a - score_b, labels)
@@ -154,12 +181,18 @@ class RoBERTa:
                 scaler.update()
                 scheduler.step()
                 total_loss += loss.item()
+                
+                progress.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
 
-            dev_accuracy = accuracy(self.predict(dev), dev_labels)
+            predictions = self.predict(dev)
+            dev_accuracy = accuracy(predictions, dev_labels)
+            balanced_accuracy = accuracy(predictions[balanced_rows], dev_labels[balanced_rows])
             print(f"Epoch {epoch + 1}/{epochs}: train loss {total_loss / steps_per_epoch:.4f}, "
-                  f"dev accuracy {dev_accuracy:.4f}, time {format_time(time.perf_counter() - epoch_start)}")
-            if dev_accuracy > self.best_accuracy:
-                self.best_accuracy = dev_accuracy
+                  f"dev accuracy {dev_accuracy:.4f}, length-balanced {balanced_accuracy:.4f}, "
+                  f"time {format_time(time.perf_counter() - epoch_start)}")
+           
+            if balanced_accuracy > self.best_accuracy:  # select on what the comments say, not length
+                self.best_accuracy = balanced_accuracy
                 best_weights = copy.deepcopy({k: v.cpu() for k, v in self.model.state_dict().items()})  # best epoch so far
 
             self.save_training_state(epoch + 1, len(train), epochs, optimizer, scheduler, scaler, rng,
@@ -208,12 +241,14 @@ class RoBERTa:
     def predict_probability(self, pairs):
         """P(labels = 1), the probability that comment A wins."""
         self.model.eval()
-        probabilities = []
-        with torch.no_grad():
-            for start in range(0, len(pairs), BATCH_SIZE):
-                score_a, score_b = self.score_pairs(pairs.iloc[start:start + BATCH_SIZE])
-                probabilities.append(torch.sigmoid(score_a - score_b).cpu().numpy())
-        return np.concatenate(probabilities)
+        order = np.argsort(pairs["n_tokens"].to_numpy())
+        probabilities = np.empty(len(pairs))
+        with torch.inference_mode():
+            for start in tqdm(range(0, len(pairs), EVAL_BATCH_SIZE), desc="Scoring", leave=False):
+                idx = order[start:start + EVAL_BATCH_SIZE]
+                score_a, score_b = self.score_pairs(pairs.iloc[idx])
+                probabilities[idx] = torch.sigmoid(score_a - score_b).cpu().numpy()
+        return probabilities
 
     def predict(self, pairs):
         return (self.predict_probability(pairs) >= 0.5).astype(int)
@@ -223,6 +258,31 @@ class RoBERTa:
         self.model.save_pretrained(directory)
         self.tokenizer.save_pretrained(directory)
 
+
+# Evaluation
+
+def accuracy(predictions, labels):
+    return float(np.mean(np.asarray(predictions) == np.asarray(labels)))
+
+def similar_length_accuracy(predictions, pairs, max_ratio=1.25):
+    """Accuracy on the pairs where the longer comment is less than 1.25x the shorter one.
+    There, picking the longer comment does not help, so the model has to use the words."""
+    mask = length_ratio(pairs) < max_ratio
+    if not mask.any():
+        return float("nan")
+    return accuracy(np.asarray(predictions)[mask.to_numpy()],
+                    pairs["labels"].to_numpy()[mask.to_numpy()])
+
+def evaluate(name, model, pairs):
+    """Prints the model's accuracy next to the length baseline on one set of pairs."""
+    pairs = model.pretokenize(pairs)
+    predictions = model.predict(pairs)
+    labels = pairs["labels"].to_numpy()
+
+    print(f"{name}")
+    print(f"Accuracy: {accuracy(predictions, labels):.4f}")
+    print(f"Similar-length accuracy: {similar_length_accuracy(predictions, pairs):.4f}")
+    print(f"Length baseline accuracy: {accuracy(pick_longer(pairs), labels):.4f}")
 
 
 if __name__ == "__main__":
@@ -247,8 +307,10 @@ if __name__ == "__main__":
     if do_train:
         start = time.perf_counter()
         model = RoBERTa()
+        train, dev = model.pretokenize(train), model.pretokenize(dev)
+        train_start = time.perf_counter()  # calculate runtime
         model.fit(train, dev, epochs=EPOCHS, resume=resume)
-        report_cost(time.perf_counter() - start, sum(weight.numel() for weight in model.model.parameters()))
+        print(f"Training time: {format_time(time.perf_counter() - train_start)}")
         model.save(CHECKPOINT_DIR)
         RESUME_PATH.unlink(missing_ok=True)  # the run is finished, so there is nothing to resume
         print(f"Saved best epoch (dev accuracy {model.best_accuracy:.4f}) to {CHECKPOINT_DIR}")
