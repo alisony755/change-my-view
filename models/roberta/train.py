@@ -233,9 +233,14 @@ def evaluate(name, model, pairs):
     predictions = model.predict(pairs)
     labels = pairs["labels"].to_numpy()
 
+    # Accuracy on the pairs where picking the longer comment scores 50%
+    balanced = pairs.index.get_indexer(balance_length(pairs).index)
+    balanced_accuracy = accuracy(predictions[balanced], labels[balanced])
+
     print(f"{name}")
     print(f"Accuracy: {accuracy(predictions, labels):.4f}")
     print(f"Similar-length accuracy: {similar_length_accuracy(predictions, pairs):.4f}")
+    print(f"Length-balanced accuracy: {balanced_accuracy:.4f} ({len(balanced)} pairs)")
     print(f"Length baseline accuracy: {accuracy(pick_longer(pairs), labels):.4f}")
 
 
