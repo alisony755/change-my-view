@@ -18,6 +18,9 @@ import zipfile
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download
+import matplotlib
+matplotlib.use("Agg") 
+import matplotlib.pyplot as plt
 import nltk
 from nltk.corpus import stopwords
 import numpy as np
@@ -31,10 +34,11 @@ sys.path.append(str(REPO))  # the repo root, so we can import data/
 from data.load_data import (TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, UNK, balance_length,
                             build_vocabulary, encode, load_test_sets, load_training_data,
                             load_winning_args, tokenize, words)
-from results.metrics.accuracy import accuracy, confusion_report, evaluate
+from results.metrics.accuracy import accuracy, confusion_report, evaluate, length_scores
 from results.metrics.cost import report_cost
 from results.metrics.length_independence import accuracy_by_length_ratio
-from results.visualizations.roc import auc
+from results.visualizations.roc import auc, plot_roc
+from results.run_log import save_output
 
 # Settings to tune on the dev set
 EMBEDDING_SIZE = 100     # numbers per word vector (with GloVe: 50, 100, 200 or 300)
@@ -73,6 +77,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 GLOVE_REPO = "stanfordnlp/glove"  
 RELEVANCE_SIZE = 100              # GloVe size used for relevance
+
+CHART_PATH = REPO / "results" / "visualizations" / "bilstm_dev.png"
 
 try:  # NLTK's stop word list, downloaded only if missing
     nltk.data.find("corpora/stopwords")
@@ -333,10 +339,34 @@ def settings_summary(train, dev, epochs):
     width = max(len(name) for name in settings) + 1  # + 1 for the colon
     for name, value in settings.items():
         print(f"  {name + ':':<{width}}  {value}")
+    
+def roc_chart(dev, probabilities):
+    """Saves the ROC curves of the BiLSTM and the length baseline to CHART_PATH, on all dev pairs
+    and on the length-balanced ones."""
+    labels = dev["labels"].to_numpy()
+    baseline_scores = np.asarray(length_scores(dev))
+    balanced = dev.index.get_indexer(balance_length(dev).index)  # their positions in dev
+    figure, axes = plt.subplots(1, 2, figsize=(12, 6))
+    plot_roc(axes[0], [("BiLSTM", labels, probabilities),
+                       ("Length baseline", labels, baseline_scores)],
+             f"All dev pairs ({len(dev)})")
+    plot_roc(axes[1], [("BiLSTM", labels[balanced], probabilities[balanced]),
+                       ("Length baseline", labels[balanced], baseline_scores[balanced])],
+             f"Length-balanced dev pairs ({len(balanced)}): length cannot help")
+    figure.suptitle("BiLSTM on r/ChangeMyView dev: which comment got more upvotes?")
+    figure.tight_layout()
+    CHART_PATH.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(CHART_PATH, dpi=150, bbox_inches="tight")
+    plt.close(figure)
+    print(f"\nLength-balanced ROC AUC: {auc(labels[balanced], probabilities[balanced]):.3f} "
+          f"(length baseline {auc(labels[balanced], baseline_scores[balanced]):.3f})")
+    print(f"ROC curves saved to {CHART_PATH.relative_to(REPO)}")
 
 
 if __name__ == "__main__":
     quick = "--quick" in sys.argv
+    if not quick:  # save everything printed from here on to results/logs/bilstm.txt
+        save_output("bilstm")
     epochs = 2 if quick else EPOCHS
     train, dev = load_training_data(columns_only=True)
     if LENGTH_BALANCED:
@@ -376,6 +406,8 @@ if __name__ == "__main__":
     print(f"ROC AUC: {auc(dev['labels'], dev_probabilities):.3f}")
     print("\nAccuracy by length ratio")
     print(accuracy_by_length_ratio(dev_predictions, dev).to_string(index=False, float_format="%.4f"))
+    if not quick:  # a --quick run's chart is not worth keeping
+      roc_chart(dev, dev_probabilities)
 
     # Pick the settings using the dev set only. When they are final, run once with --test to get
     # the numbers to report.

@@ -20,6 +20,7 @@ from data.load_data import (TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, load_test_sets,
 from results.metrics.accuracy import evaluate
 from results.metrics.cost import report_cost
 from results.metrics.length_independence import accuracy_by_length_ratio
+from results.run_log import save_output
 
 
 # TF-IDF
@@ -208,6 +209,7 @@ def compare_with_sklearn(model, train_features, train_labels, dev_features):
 
 
 if __name__ == "__main__":
+    save_output("tfidf_lr")
     train, dev = load_training_data(columns_only=True)
     print(f"{len(train)} train pairs, {len(dev)} dev pairs")
 

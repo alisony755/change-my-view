@@ -1,0 +1,65 @@
+
+Settings
+========
+  Train pairs:    9,924
+  Dev pairs:      1,615
+  Device:         cuda
+  Epochs:         8
+  Best epoch by:  all dev pairs
+  Pooling:        last
+  Word vectors:   GloVe 100d, frozen
+  Length weight:  on, starts from length-only, fixed
+  Relevance:      on
+  Post tokens:    200
+
+Training
+========
+Vocabulary: 33,496 words
+GloVe vectors: 28,822 of these words (86%)
+Before training: dev accuracy 0.7090 (length weight 0.9650, relevance weight -2.9400)
+
+Epoch  Train loss  Dev accuracy  Length-balanced   Time
+    1      0.5621        0.7152           0.5113   44 s
+    2      0.5585        0.7158           0.5166   16 s
+    3      0.5543        0.7207           0.5295   16 s
+    4      0.5519        0.7170           0.5198   16 s
+    5      0.5486        0.7158           0.5273   16 s
+    6      0.5429        0.7251           0.5445   16 s
+    7      0.5369        0.7269           0.5402   16 s
+    8      0.5330        0.7065           0.5327   16 s
+Kept epoch 7, the best on all dev pairs
+
+
+Training time: 230.3 s | parameters: 3,683,683 | peak memory of the run: 2,067 MB
+Trained parameters: 334,082 (the rest are the frozen GloVe vectors)
+Learned weights (positive: the longer / more on-topic comment is predicted to win)
+  length:    0.9650
+  relevance: -2.9207
+
+Dev results (r/changemyview)
+============================
+
+Dev (changemyview)
+Accuracy: 0.7269 ± 0.022 on 1615 pairs (length baseline 0.7108)
+Similar-length accuracy: 0.5869 ± 0.066 on 213 pairs (length baseline 0.5493)
+Length-balanced accuracy: 0.5402 ± 0.032 on 933 pairs (length baseline 0.4995)
+Majority baseline (always guess B): 0.4848
+
+Confusion matrix
+                 A won   B won
+    said A won     596     205
+    said B won     236     578
+    Accuracy 0.727   Precision 0.744   Recall 0.716   F1 0.730
+ROC AUC: 0.789
+
+Accuracy by length ratio
+Longer comment is  Pairs  Accuracy  Length baseline
+          1-1.25x    213    0.5869           0.5493
+        1.25-1.5x    167    0.5569           0.5629
+           1.5-2x    223    0.6637           0.6099
+             2-3x    283    0.7138           0.7102
+             3-5x    329    0.7964           0.7842
+              5x+    400    0.8600           0.8550
+
+Length-balanced ROC AUC: 0.544 (length baseline 0.503)
+ROC curves saved to results/visualizations/bilstm_dev.png
