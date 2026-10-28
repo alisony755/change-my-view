@@ -26,6 +26,10 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
 from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, length_ratio, load_test_sets, load_training_data, pick_longer, load_winning_args
 
+from results.metrics.cost import report_cost
+from results.metrics.length_independence import accuracy_by_length_ratio
+from results.run_log import save_output
+
 # Model settings.
 MODEL_NAME = "roberta-base"
 MAX_LENGTH = 512        # RoBERTa's limit; longer post + comment texts are cut
@@ -258,12 +262,16 @@ if __name__ == "__main__":
     if "--quick" in sys.argv:  # random subsets, the same every run
         train = train.sample(n=min(QUICK_PAIRS, len(train)), random_state=SEED)
         dev = dev.sample(n=min(QUICK_PAIRS, len(dev)), random_state=SEED)
+    else:
+        save_output("roberta")
     print(f"{len(train)} train pairs, {len(dev)} dev pairs, device {DEVICE}")
 
 
     if do_train:
+        start = time.perf_counter()
         model = RoBERTa()
         model.fit(train, dev, epochs=EPOCHS, resume=resume)
+        report_cost(time.perf_counter() - start, sum(weight.numel() for weight in model.model.parameters()))
         model.save(CHECKPOINT_DIR)
         RESUME_PATH.unlink(missing_ok=True)  # the run is finished, so there is nothing to resume
         print(f"Saved best epoch (dev accuracy {model.best_accuracy:.4f}) to {CHECKPOINT_DIR}")
@@ -273,7 +281,10 @@ if __name__ == "__main__":
         model = RoBERTa(CHECKPOINT_DIR)
         print(f"Loaded saved model from {CHECKPOINT_DIR}")
 
+    dev_predictions = model.predict(dev)
     evaluate("Dev (changemyview)", model, dev)
+    print("\nDev accuracy by length ratio")
+    print(accuracy_by_length_ratio(dev_predictions, dev).to_string(index=False, float_format="%.4f"))
 
     # The test sets are for the final numbers only: run with --test once the settings are chosen
     if do_test:
