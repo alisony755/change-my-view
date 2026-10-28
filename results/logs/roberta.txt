@@ -1,145 +1,173 @@
 5662 train pairs, 1615 dev pairs, device cuda
-Epoch 1/2: train loss 0.6878, dev accuracy 0.6508, time 5m56s
-Epoch 2/2: train loss 0.6308, dev accuracy 0.6477, time 6m01s
-
-Training time: 752.3 s | parameters: 124,646,401 | peak memory of the run: 2,767 MB
-Saved best epoch (dev accuracy 0.6508) to /content/drive/MyDrive/change-my-view/models/roberta/checkpoint
+Epoch 1/5: train loss 0.6917, dev accuracy 0.6050, length-balanced 0.5563, time 1m34s
+Epoch 2/5: train loss 0.6301, dev accuracy 0.6074, length-balanced 0.6281, time 1m32s
+Epoch 3/5: train loss 0.4037, dev accuracy 0.6539, length-balanced 0.6131, time 1m32s
+Epoch 4/5: train loss 0.1736, dev accuracy 0.6625, length-balanced 0.6281, time 1m31s
+Epoch 5/5: train loss 0.0687, dev accuracy 0.6502, length-balanced 0.6227, time 1m31s
+Training time: 7m56s
+Saved best epoch (dev accuracy 0.6281) to D:\workspace\projects\change-my-view\models\roberta\checkpoint
 
 Dev (changemyview)
-Accuracy: 0.6508 Â± 0.023 on 1615 pairs (length baseline 0.7108)
-Similar-length accuracy: 0.6009 Â± 0.066 on 213 pairs (length baseline 0.5493)
-Length-balanced accuracy: 0.5831 Â± 0.032 on 933 pairs (length baseline 0.4995)
+Accuracy: 0.6074 ± 0.024 on 1615 pairs (length baseline 0.7108)
+Similar-length accuracy: 0.5822 ± 0.066 on 213 pairs (length baseline 0.5493)
+Length-balanced accuracy: 0.6281 ± 0.031 on 933 pairs (length baseline 0.4995)
 Majority baseline (always guess B): 0.4848
 
 Confusion matrix
                  A won   B won
-    said A won     541     273
-    said B won     291     510
-    Accuracy 0.651   Precision 0.665   Recall 0.650   F1 0.657
-ROC AUC: 0.706
+    said A won     512     314
+    said B won     320     469
+    Accuracy 0.607   Precision 0.620   Recall 0.615   F1 0.618
+ROC AUC: 0.658
 
 Dev accuracy by length ratio
 Longer comment is  Pairs  Accuracy  Length baseline
-          1-1.25x    213    0.6009           0.5493
-        1.25-1.5x    167    0.5689           0.5629
+          1-1.25x    213    0.5822           0.5493
+        1.25-1.5x    167    0.6407           0.5629
            1.5-2x    223    0.6457           0.6099
-             2-3x    283    0.6113           0.7102
-             3-5x    329    0.6596           0.7842
-              5x+    400    0.7350           0.8550
+             2-3x    283    0.6572           0.7102
+             3-5x    329    0.6170           0.7842
+              5x+    400    0.5425           0.8550
 
-Length-balanced ROC AUC: 0.601 (length baseline 0.503)
-ROC curves saved to /content/drive/MyDrive/change-my-view/results/visualizations/roberta_dev.png
+Length-balanced ROC AUC: 0.692 (length baseline 0.503)
+ROC curves saved to D:\workspace\projects\change-my-view\results\visualizations\roberta_dev.png
 
 Seen test (changemyview)
-Accuracy: 0.6436 Â± 0.040 on 564 pairs (length baseline 0.6968)
-Similar-length accuracy: 0.6447 Â± 0.108 on 76 pairs (length baseline 0.5526)
-Length-balanced accuracy: 0.6152 Â± 0.051 on 343 pairs (length baseline 0.5015)
+Accuracy: 0.5798 ± 0.041 on 564 pairs (length baseline 0.6968)
+Similar-length accuracy: 0.5921 ± 0.110 on 76 pairs (length baseline 0.5526)
+Length-balanced accuracy: 0.6414 ± 0.051 on 343 pairs (length baseline 0.5015)
 Majority baseline (always guess B): 0.4965
 
 Unseen test (askacademia)
-Accuracy: 0.6523 Â± 0.047 on 394 pairs (length baseline 0.6193)
-Similar-length accuracy: 0.6000 Â± 0.143 on 45 pairs (length baseline 0.5111)
-Length-balanced accuracy: 0.6329 Â± 0.056 on 286 pairs (length baseline 0.5035)
+Accuracy: 0.5685 ± 0.049 on 394 pairs (length baseline 0.6193)
+Similar-length accuracy: 0.6667 ± 0.138 on 45 pairs (length baseline 0.5111)
+Length-balanced accuracy: 0.5874 ± 0.057 on 286 pairs (length baseline 0.5035)
 Majority baseline (always guess B): 0.5254
 
 Unseen test (askanthropology)
-Accuracy: 0.7290 Â± 0.084 on 107 pairs (length baseline 0.7477)
-Similar-length accuracy: 0.6875 Â± 0.227 on 16 pairs (length baseline 0.5000)
-Length-balanced accuracy: 0.6000 Â± 0.136 on 50 pairs (length baseline 0.5000)
+Accuracy: 0.6262 ± 0.092 on 107 pairs (length baseline 0.7477)
+Similar-length accuracy: 0.8125 ± 0.191 on 16 pairs (length baseline 0.5000)
+Length-balanced accuracy: 0.7200 ± 0.124 on 50 pairs (length baseline 0.5000)
 Majority baseline (always guess B): 0.4953
 
 Unseen test (askbaking)
-Accuracy: 0.6048 Â± 0.061 on 248 pairs (length baseline 0.6331)
-Similar-length accuracy: 0.6071 Â± 0.181 on 28 pairs (length baseline 0.4286)
-Length-balanced accuracy: 0.6171 Â± 0.072 on 175 pairs (length baseline 0.4971)
+Accuracy: 0.5645 ± 0.062 on 248 pairs (length baseline 0.6331)
+Similar-length accuracy: 0.7143 ± 0.167 on 28 pairs (length baseline 0.4286)
+Length-balanced accuracy: 0.6229 ± 0.072 on 175 pairs (length baseline 0.4971)
 Majority baseline (always guess B): 0.5202
 
 Unseen test (askcarguys)
-Accuracy: 0.6531 Â± 0.133 on 49 pairs (length baseline 0.6122)
-Similar-length accuracy: 0.2500 Â± 0.424 on 4 pairs (length baseline 0.5000)
-Length-balanced accuracy: 0.6250 Â± 0.168 on 32 pairs (length baseline 0.5000)
+Accuracy: 0.4694 ± 0.140 on 49 pairs (length baseline 0.6122)
+Similar-length accuracy: 0.2500 ± 0.424 on 4 pairs (length baseline 0.5000)
+Length-balanced accuracy: 0.4688 ± 0.173 on 32 pairs (length baseline 0.5000)
 Majority baseline (always guess B): 0.5510
 
 Unseen test (askculinary)
-Accuracy: 0.6451 Â± 0.036 on 696 pairs (length baseline 0.6408)
-Similar-length accuracy: 0.5930 Â± 0.104 on 86 pairs (length baseline 0.4884)
-Length-balanced accuracy: 0.6166 Â± 0.043 on 493 pairs (length baseline 0.5030)
+Accuracy: 0.5489 ± 0.037 on 696 pairs (length baseline 0.6408)
+Similar-length accuracy: 0.5116 ± 0.106 on 86 pairs (length baseline 0.4884)
+Length-balanced accuracy: 0.5943 ± 0.043 on 493 pairs (length baseline 0.5030)
 Majority baseline (always guess B): 0.4943
 
 Unseen test (askdocs)
-Accuracy: 0.4949 Â± 0.098 on 99 pairs (length baseline 0.6162)
-Similar-length accuracy: 0.7222 Â± 0.207 on 18 pairs (length baseline 0.3889)
-Length-balanced accuracy: 0.4783 Â± 0.118 on 69 pairs (length baseline 0.4928)
+Accuracy: 0.5152 ± 0.098 on 99 pairs (length baseline 0.6162)
+Similar-length accuracy: 0.5556 ± 0.230 on 18 pairs (length baseline 0.3889)
+Length-balanced accuracy: 0.5362 ± 0.118 on 69 pairs (length baseline 0.4928)
 Majority baseline (always guess B): 0.5152
 
 Unseen test (askengineers)
-Accuracy: 0.6221 Â± 0.037 on 651 pairs (length baseline 0.6190)
-Similar-length accuracy: 0.6774 Â± 0.116 on 62 pairs (length baseline 0.5323)
-Length-balanced accuracy: 0.5931 Â± 0.043 on 494 pairs (length baseline 0.4980)
+Accuracy: 0.5929 ± 0.038 on 651 pairs (length baseline 0.6190)
+Similar-length accuracy: 0.6613 ± 0.118 on 62 pairs (length baseline 0.5323)
+Length-balanced accuracy: 0.6255 ± 0.043 on 494 pairs (length baseline 0.4980)
 Majority baseline (always guess B): 0.4885
 
 Unseen test (askhistorians)
-Accuracy: 0.5915 Â± 0.114 on 71 pairs (length baseline 0.8732)
-Similar-length accuracy: 0.0000 Â± 0.000 on 3 pairs (length baseline 0.3333)
-Length-balanced accuracy: 0.2143 Â± 0.215 on 14 pairs (length baseline 0.5000)
+Accuracy: 0.4085 ± 0.114 on 71 pairs (length baseline 0.8732)
+Similar-length accuracy: 0.3333 ± 0.533 on 3 pairs (length baseline 0.3333)
+Length-balanced accuracy: 0.6429 ± 0.251 on 14 pairs (length baseline 0.5000)
 Majority baseline (always guess B): 0.5634
 
 Unseen test (askhr)
-Accuracy: 0.6788 Â± 0.078 on 137 pairs (length baseline 0.6350)
-Similar-length accuracy: 0.5652 Â± 0.203 on 23 pairs (length baseline 0.3478)
-Length-balanced accuracy: 0.6471 Â± 0.102 on 85 pairs (length baseline 0.4941)
+Accuracy: 0.5912 ± 0.082 on 137 pairs (length baseline 0.6350)
+Similar-length accuracy: 0.8261 ± 0.155 on 23 pairs (length baseline 0.3478)
+Length-balanced accuracy: 0.6471 ± 0.102 on 85 pairs (length baseline 0.4941)
 Majority baseline (always guess B): 0.4891
 
 Unseen test (askphilosophy)
-Accuracy: 0.6327 Â± 0.060 on 245 pairs (length baseline 0.6367)
-Similar-length accuracy: 0.6800 Â± 0.183 on 25 pairs (length baseline 0.4400)
-Length-balanced accuracy: 0.5793 Â± 0.076 on 164 pairs (length baseline 0.4939)
+Accuracy: 0.5551 ± 0.062 on 245 pairs (length baseline 0.6367)
+Similar-length accuracy: 0.5600 ± 0.195 on 25 pairs (length baseline 0.4400)
+Length-balanced accuracy: 0.6220 ± 0.074 on 164 pairs (length baseline 0.4939)
 Majority baseline (always guess B): 0.4898
 
 Unseen test (askphysics)
-Accuracy: 0.6648 Â± 0.069 on 179 pairs (length baseline 0.6704)
-Similar-length accuracy: 0.6667 Â± 0.239 on 15 pairs (length baseline 0.5333)
-Length-balanced accuracy: 0.6525 Â± 0.086 on 118 pairs (length baseline 0.5000)
+Accuracy: 0.6480 ± 0.070 on 179 pairs (length baseline 0.6704)
+Similar-length accuracy: 0.6000 ± 0.248 on 15 pairs (length baseline 0.5333)
+Length-balanced accuracy: 0.6780 ± 0.084 on 118 pairs (length baseline 0.5000)
 Majority baseline (always guess B): 0.4749
 
 Unseen test (askscience)
-Accuracy: 0.6156 Â± 0.053 on 320 pairs (length baseline 0.6469)
-Similar-length accuracy: 0.4348 Â± 0.143 on 46 pairs (length baseline 0.4565)
-Length-balanced accuracy: 0.5207 Â± 0.066 on 217 pairs (length baseline 0.5023)
+Accuracy: 0.6344 ± 0.053 on 320 pairs (length baseline 0.6469)
+Similar-length accuracy: 0.7174 ± 0.130 on 46 pairs (length baseline 0.4565)
+Length-balanced accuracy: 0.6359 ± 0.064 on 217 pairs (length baseline 0.5023)
 Majority baseline (always guess B): 0.5031
 
 Unseen test (asksciencefiction)
-Accuracy: 0.6676 Â± 0.035 on 683 pairs (length baseline 0.7584)
-Similar-length accuracy: 0.6061 Â± 0.118 on 66 pairs (length baseline 0.6667)
-Length-balanced accuracy: 0.6220 Â± 0.052 on 336 pairs (length baseline 0.5089)
+Accuracy: 0.5007 ± 0.037 on 683 pairs (length baseline 0.7584)
+Similar-length accuracy: 0.6667 ± 0.114 on 66 pairs (length baseline 0.6667)
+Length-balanced accuracy: 0.6369 ± 0.051 on 336 pairs (length baseline 0.5089)
 Majority baseline (always guess B): 0.5051
 
 Unseen test (asksocialscience)
-Accuracy: 0.7465 Â± 0.101 on 71 pairs (length baseline 0.6620)
-Similar-length accuracy: 0.4444 Â± 0.325 on 9 pairs (length baseline 0.2222)
-Length-balanced accuracy: 0.6053 Â± 0.155 on 38 pairs (length baseline 0.5000)
+Accuracy: 0.5634 ± 0.115 on 71 pairs (length baseline 0.6620)
+Similar-length accuracy: 0.4444 ± 0.325 on 9 pairs (length baseline 0.2222)
+Length-balanced accuracy: 0.5789 ± 0.157 on 38 pairs (length baseline 0.5000)
 Majority baseline (always guess B): 0.3944
 
 Unseen test (askvet)
-Accuracy: 0.5972 Â± 0.113 on 72 pairs (length baseline 0.6667)
-Similar-length accuracy: 0.4286 Â± 0.259 on 14 pairs (length baseline 0.5714)
-Length-balanced accuracy: 0.6383 Â± 0.137 on 47 pairs (length baseline 0.4894)
+Accuracy: 0.6250 ± 0.112 on 72 pairs (length baseline 0.6667)
+Similar-length accuracy: 0.6429 ± 0.251 on 14 pairs (length baseline 0.5714)
+Length-balanced accuracy: 0.6809 ± 0.133 on 47 pairs (length baseline 0.4894)
 Majority baseline (always guess B): 0.5972
 
 Unseen test (explainlikeimfive)
-Accuracy: 0.6654 Â± 0.040 on 526 pairs (length baseline 0.6825)
-Similar-length accuracy: 0.5647 Â± 0.105 on 85 pairs (length baseline 0.4824)
-Length-balanced accuracy: 0.5872 Â± 0.053 on 327 pairs (length baseline 0.5015)
+Accuracy: 0.5913 ± 0.042 on 526 pairs (length baseline 0.6825)
+Similar-length accuracy: 0.6941 ± 0.098 on 85 pairs (length baseline 0.4824)
+Length-balanced accuracy: 0.6391 ± 0.052 on 327 pairs (length baseline 0.5015)
 Majority baseline (always guess B): 0.4791
 
 Unseen test (legaladvice)
-Accuracy: 0.6179 Â± 0.047 on 403 pairs (length baseline 0.6030)
-Similar-length accuracy: 0.7250 Â± 0.138 on 40 pairs (length baseline 0.4500)
-Length-balanced accuracy: 0.5672 Â± 0.056 on 305 pairs (length baseline 0.5016)
+Accuracy: 0.4839 ± 0.049 on 403 pairs (length baseline 0.6030)
+Similar-length accuracy: 0.6750 ± 0.145 on 40 pairs (length baseline 0.4500)
+Length-balanced accuracy: 0.5148 ± 0.056 on 305 pairs (length baseline 0.5016)
 Majority baseline (always guess B): 0.5186
 
 Persuasion test (Winning Arguments)
-Accuracy: 0.5677 Â± 0.015 on 4120 pairs (length baseline 0.6245)
-Similar-length accuracy: 0.5588 Â± 0.031 on 961 pairs (length baseline 0.5380)
-Length-balanced accuracy: 0.5374 Â± 0.018 on 3098 pairs (length baseline 0.5006)
+Accuracy: 0.5735 ± 0.015 on 4120 pairs (length baseline 0.6245)
+Similar-length accuracy: 0.5453 ± 0.031 on 961 pairs (length baseline 0.5380)
+Length-balanced accuracy: 0.5468 ± 0.018 on 3098 pairs (length baseline 0.5006)
 Majority baseline (always guess B): 0.5024
+
+Generalization
+==============
+Test set                Group       Pairs  Accuracy  Bal. pairs  Balanced
+changemyview            Seen          564    0.5798         343    0.6414
+askacademia             Unseen        394    0.5685         286    0.5874
+askanthropology         Unseen        107    0.6262          50    0.7200
+askbaking               Unseen        248    0.5645         175    0.6229
+askcarguys              Unseen         49    0.4694          32    0.4688
+askculinary             Unseen        696    0.5489         493    0.5943
+askdocs                 Unseen         99    0.5152          69    0.5362
+askengineers            Unseen        651    0.5929         494    0.6255
+askhistorians           Unseen         71    0.4085          14    0.6429
+askhr                   Unseen        137    0.5912          85    0.6471
+askphilosophy           Unseen        245    0.5551         164    0.6220
+askphysics              Unseen        179    0.6480         118    0.6780
+askscience              Unseen        320    0.6344         217    0.6359
+asksciencefiction       Unseen        683    0.5007         336    0.6369
+asksocialscience        Unseen         71    0.5634          38    0.5789
+askvet                  Unseen         72    0.6250          47    0.6809
+explainlikeimfive       Unseen        526    0.5913         327    0.6391
+legaladvice             Unseen        403    0.4839         305    0.5148
+Winning Arguments       Persuasion   4120    0.5735        3098    0.5468
+
+Seen 0.5798 | unseen pooled 0.5597, unseen average 0.5581 | gap (seen - unseen pooled) +0.0201  [all pairs]
+Seen 0.6414 | unseen pooled 0.6108, unseen average 0.6136 | gap (seen - unseen pooled) +0.0306  [length-balanced pairs]

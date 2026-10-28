@@ -240,6 +240,8 @@ class RoBERTa:
 
     def predict_probability(self, pairs):
         """P(labels = 1), the probability that comment A wins."""
+        if "n_tokens" not in pairs.columns:   # test sets arrive untokenized
+            pairs = self.pretokenize(pairs)
         self.model.eval()
         order = np.argsort(pairs["n_tokens"].to_numpy())
         probabilities = np.empty(len(pairs))
@@ -260,30 +262,6 @@ class RoBERTa:
 
 
 # Evaluation
-
-def accuracy(predictions, labels):
-    return float(np.mean(np.asarray(predictions) == np.asarray(labels)))
-
-def similar_length_accuracy(predictions, pairs, max_ratio=1.25):
-    """Accuracy on the pairs where the longer comment is less than 1.25x the shorter one.
-    There, picking the longer comment does not help, so the model has to use the words."""
-    mask = length_ratio(pairs) < max_ratio
-    if not mask.any():
-        return float("nan")
-    return accuracy(np.asarray(predictions)[mask.to_numpy()],
-                    pairs["labels"].to_numpy()[mask.to_numpy()])
-
-def evaluate(name, model, pairs):
-    """Prints the model's accuracy next to the length baseline on one set of pairs."""
-    pairs = model.pretokenize(pairs)
-    predictions = model.predict(pairs)
-    labels = pairs["labels"].to_numpy()
-
-    print(f"{name}")
-    print(f"Accuracy: {accuracy(predictions, labels):.4f}")
-    print(f"Similar-length accuracy: {similar_length_accuracy(predictions, pairs):.4f}")
-    print(f"Length baseline accuracy: {accuracy(pick_longer(pairs), labels):.4f}")
-
 
 if __name__ == "__main__":
     resume = "--resume-training" in sys.argv
