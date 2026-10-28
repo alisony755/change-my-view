@@ -27,6 +27,15 @@ from tqdm.auto import tqdm
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
 from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, length_ratio, load_test_sets, load_training_data, pick_longer, load_winning_args
 
+from results.metrics.cost import report_cost
+from results.metrics.length_independence import accuracy_by_length_ratio
+from results.run_log import save_output
+from results.metrics.accuracy import accuracy, confusion_report, evaluate
+from results.visualizations.roc import auc, roc_chart
+from results.metrics.generalization import generalization_report
+
+
+
 # Model settings.
 MODEL_NAME = "roberta-base"
 MAX_LENGTH = 384        # RoBERTa's limit; longer post + comment texts are cut
@@ -45,6 +54,7 @@ LENGTH_BALANCED = True
 
 CHECKPOINT_DIR = Path(__file__).resolve().parent / "checkpoint"
 RESUME_PATH = Path(__file__).resolve().parent / "resume_checkpoint" / "training_state.pt"  # saved after every epoch, so --resume-training can continue
+CHART_PATH = Path(__file__).resolve().parents[2] / "results" / "visualizations" / "roberta_dev.png"
 QUICK_PAIRS = 64        # --quick uses this many train pairs and dev pairs
 
 
@@ -282,8 +292,11 @@ if __name__ == "__main__":
         sys.exit("Pass --train, --resume-training, --test, or a combination")
     if resume and not RESUME_PATH.exists():
         sys.exit(f"No training state at {RESUME_PATH}. Run with --train first.")
+    if "--quick" not in sys.argv:  # save everything printed from here on to results/logs/roberta.txt
+        save_output("roberta")
 
     train, dev = load_training_data(columns_only=True)
+    majority_label = int(train["labels"].mean() >= 0.5)  # taken before balancing, so the baseline matches the other models
     if LENGTH_BALANCED:
         train = balance_length(train)
     if "--quick" in sys.argv:  # random subsets, the same every run
@@ -291,8 +304,8 @@ if __name__ == "__main__":
         dev = dev.sample(n=min(QUICK_PAIRS, len(dev)), random_state=SEED)
     print(f"{len(train)} train pairs, {len(dev)} dev pairs, device {DEVICE}")
 
-
     if do_train:
+        start = time.perf_counter()
         model = RoBERTa()
         train, dev = model.pretokenize(train), model.pretokenize(dev)
         train_start = time.perf_counter()  # calculate runtime
@@ -307,13 +320,26 @@ if __name__ == "__main__":
         model = RoBERTa(CHECKPOINT_DIR)
         print(f"Loaded saved model from {CHECKPOINT_DIR}")
 
-    evaluate("Dev (changemyview)", model, dev)
+    dev_probabilities = model.predict_probability(dev)
+    dev_predictions = (dev_probabilities >= 0.5).astype(int)
+    evaluate("Dev (changemyview)", dev_predictions, dev, majority_label)
+    confusion_report("Confusion matrix", dev["labels"].to_numpy(), dev_predictions)
+    print(f"ROC AUC: {auc(dev['labels'], dev_probabilities):.3f}")
+    print("\nDev accuracy by length ratio")
+    print(accuracy_by_length_ratio(dev_predictions, dev).to_string(index=False, float_format="%.4f"))
+
+    if "--quick" not in sys.argv: 
+        roc_chart("RoBERTa", dev, dev_probabilities, CHART_PATH)
 
     # The test sets are for the final numbers only: run with --test once the settings are chosen
     if do_test:
+        test_results = {"Seen": {}, "Unseen": {}, "Persuasion": {}}
+
         for name, pairs in load_test_sets(TRAIN_SUBREDDITS, columns_only=True).items():
-            evaluate(f"Seen test ({name})", model, pairs)
+            test_results["Seen"][name] = evaluate(f"Seen test ({name})", model.predict(pairs), pairs, majority_label)
         for name, pairs in load_test_sets(UNSEEN_SUBREDDITS, columns_only=True).items():
-            evaluate(f"Unseen test ({name})", model, pairs)
+            test_results["Unseen"][name] = evaluate(f"Unseen test ({name})", model.predict(pairs), pairs, majority_label)
         # labels = 1 if comment A earned a delta: did the model learn persuasion, or only upvotes?
-        evaluate("Persuasion test (Winning Arguments)", model, load_winning_args(columns_only=True))
+        persuasion = load_winning_args(columns_only=True)
+        test_results["Persuasion"]["Winning Arguments"] = evaluate("Persuasion test (Winning Arguments)", model.predict(persuasion), persuasion, majority_label)
+        generalization_report(test_results)
