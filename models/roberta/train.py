@@ -31,6 +31,7 @@ from results.metrics.length_independence import accuracy_by_length_ratio
 from results.run_log import save_output
 from results.metrics.accuracy import accuracy, confusion_report, evaluate
 from results.visualizations.roc import auc, roc_chart
+from results.metrics.generalization import generalization_report
 
 
 
@@ -270,10 +271,13 @@ if __name__ == "__main__":
 
     # The test sets are for the final numbers only: run with --test once the settings are chosen
     if do_test:
+        test_results = {"Seen": {}, "Unseen": {}, "Persuasion": {}}
+
         for name, pairs in load_test_sets(TRAIN_SUBREDDITS, columns_only=True).items():
-            evaluate(f"Seen test ({name})", model.predict(pairs), pairs, majority_label)
+            test_results["Seen"][name] = evaluate(f"Seen test ({name})", model.predict(pairs), pairs, majority_label)
         for name, pairs in load_test_sets(UNSEEN_SUBREDDITS, columns_only=True).items():
-            evaluate(f"Unseen test ({name})", model.predict(pairs), pairs, majority_label)
+            test_results["Unseen"][name] = evaluate(f"Unseen test ({name})", model.predict(pairs), pairs, majority_label)
         # labels = 1 if comment A earned a delta: did the model learn persuasion, or only upvotes?
         persuasion = load_winning_args(columns_only=True)
-        evaluate("Persuasion test (Winning Arguments)", model.predict(persuasion), persuasion, majority_label)
+        test_results["Persuasion"]["Winning Arguments"] = evaluate("Persuasion test (Winning Arguments)", model.predict(persuasion), persuasion, majority_label)
+        generalization_report(test_results)

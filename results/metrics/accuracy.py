@@ -44,6 +44,9 @@ def evaluate(name, predictions, pairs, majority_label):
     majority = accuracy(np.full(len(labels), majority_label), labels)
     print(f"Majority baseline (always guess {'A' if majority_label else 'B'}): {majority:.4f}")
 
+    return {"accuracy": accuracy(predictions, labels), "pairs": len(labels),
+            "balanced": accuracy(predictions[balanced], labels[balanced]), "balanced_pairs": len(balanced)}
+
 def length_scores(pairs):
     """The length baseline as a score, for ROC curves: log(words in A / words in B). Above 0
     means A is longer."""
