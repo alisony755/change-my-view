@@ -14,7 +14,7 @@ There are a few arguments that you can pass to the script:
 So the command to train and test the entire model would be:
 
 ```
-python data/models/roberta/train.py --train --test
+python models/roberta/train.py --train --test
 ```
 
 # Architecture
