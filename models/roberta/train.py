@@ -29,7 +29,9 @@ from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, 
 from results.metrics.cost import report_cost
 from results.metrics.length_independence import accuracy_by_length_ratio
 from results.run_log import save_output
-from results.metrics.accuracy import accuracy, evaluate
+from results.metrics.accuracy import accuracy, confusion_report, evaluate
+from results.visualizations.roc import auc
+
 
 # Model settings.
 MODEL_NAME = "roberta-base"
@@ -253,8 +255,11 @@ if __name__ == "__main__":
         model = RoBERTa(CHECKPOINT_DIR)
         print(f"Loaded saved model from {CHECKPOINT_DIR}")
 
-    dev_predictions = model.predict(dev)
+    dev_probabilities = model.predict_probability(dev)
+    dev_predictions = (dev_probabilities >= 0.5).astype(int)
     evaluate("Dev (changemyview)", dev_predictions, dev, majority_label)
+    confusion_report("Confusion matrix", dev["labels"].to_numpy(), dev_predictions)
+    print(f"ROC AUC: {auc(dev['labels'], dev_probabilities):.3f}")
     print("\nDev accuracy by length ratio")
     print(accuracy_by_length_ratio(dev_predictions, dev).to_string(index=False, float_format="%.4f"))
 
