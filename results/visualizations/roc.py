@@ -8,6 +8,13 @@ likely A won": a probability from a model, or log(words in A / words in B) for t
 """
 import numpy as np
 
+import matplotlib
+matplotlib.use("Agg")  # write the image file without opening a window
+import matplotlib.pyplot as plt
+
+from data.load_data import balance_length
+from results.metrics.accuracy import length_scores
+
 def roc_points(labels, scores):
     """(FP rates, TP rates), from the highest threshold to the lowest.
     Pairs with the same score are passed together, so ties make one diagonal step."""
@@ -39,3 +46,28 @@ def plot_roc(axis, curves, title):
     axis.set_title(title)
     axis.legend(loc="lower right", fontsize=8)
     axis.set_aspect("equal")
+
+"""
+Draws and saves a model's ROC chart on the dev set, next to the length baseline. The ROC math
+and plot_roc are in roc.py; this file builds the figure and saves it.
+"""
+def roc_chart(name, dev, probabilities, path):
+    """Saves ROC curves of a model and the length baseline to path, on all dev pairs and on the
+    length-balanced ones."""
+    labels = dev["labels"].to_numpy()
+    baseline_scores = np.asarray(length_scores(dev))
+    balanced = dev.index.get_indexer(balance_length(dev).index)  # their positions in dev
+    figure, axes = plt.subplots(1, 2, figsize=(12, 6))
+    plot_roc(axes[0], [(name, labels, probabilities), ("Length baseline", labels, baseline_scores)],
+             f"All dev pairs ({len(dev)})")
+    plot_roc(axes[1], [(name, labels[balanced], probabilities[balanced]),
+                       ("Length baseline", labels[balanced], baseline_scores[balanced])],
+             f"Length-balanced dev pairs ({len(balanced)}): length cannot help")
+    figure.suptitle(f"{name} on r/ChangeMyView dev: which comment got more upvotes?")
+    figure.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(figure)
+    print(f"\nLength-balanced ROC AUC: {auc(labels[balanced], probabilities[balanced]):.3f} "
+          f"(length baseline {auc(labels[balanced], baseline_scores[balanced]):.3f})")
+    print(f"ROC curves saved to {path}")

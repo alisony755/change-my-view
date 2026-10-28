@@ -30,7 +30,8 @@ from results.metrics.cost import report_cost
 from results.metrics.length_independence import accuracy_by_length_ratio
 from results.run_log import save_output
 from results.metrics.accuracy import accuracy, confusion_report, evaluate
-from results.visualizations.roc import auc
+from results.visualizations.roc import auc, roc_chart
+
 
 
 # Model settings.
@@ -49,6 +50,7 @@ LENGTH_BALANCED = True
 
 CHECKPOINT_DIR = Path(__file__).resolve().parent / "checkpoint"
 RESUME_PATH = Path(__file__).resolve().parent / "resume_checkpoint" / "training_state.pt"  # saved after every epoch, so --resume-training can continue
+CHART_PATH = Path(__file__).resolve().parents[2] / "results" / "visualizations" / "roberta_dev.png"
 QUICK_PAIRS = 64        # --quick uses this many train pairs and dev pairs
 
 
@@ -262,6 +264,9 @@ if __name__ == "__main__":
     print(f"ROC AUC: {auc(dev['labels'], dev_probabilities):.3f}")
     print("\nDev accuracy by length ratio")
     print(accuracy_by_length_ratio(dev_predictions, dev).to_string(index=False, float_format="%.4f"))
+
+    if "--quick" not in sys.argv: 
+        roc_chart("RoBERTa", dev, dev_probabilities, CHART_PATH)
 
     # The test sets are for the final numbers only: run with --test once the settings are chosen
     if do_test:
