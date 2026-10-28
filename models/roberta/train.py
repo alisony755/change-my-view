@@ -24,7 +24,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))  # the repo root, so we can import data/
-from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, length_ratio, load_test_sets, load_training_data, pick_longer, load_winning_args
+from data.load_data import TRAIN_SUBREDDITS, UNSEEN_SUBREDDITS, balance_length, length_ratio, load_test_sets, load_training_data, pick_longer, load_winning_args
 
 # Model settings.
 MODEL_NAME = "roberta-base"
@@ -35,6 +35,10 @@ EPOCHS = 2
 WARMUP_FRACTION = 0.1   # the learning rate rises for this fraction of the steps, then falls to 0
 SEED = 0
 USE_POST = True         # False = score the comment alone, for the context-sensitivity experiment
+
+# Train only on pairs where the longer comment wins half the time, so the model cannot learn
+# "longer wins" and has to use the words. False trains on all pairs.
+LENGTH_BALANCED = True
 
 CHECKPOINT_DIR = Path(__file__).resolve().parent / "checkpoint"
 RESUME_PATH = Path(__file__).resolve().parent / "resume_checkpoint" / "training_state.pt"  # saved after every epoch, so --resume-training can continue
@@ -244,10 +248,13 @@ if __name__ == "__main__":
         sys.exit(f"No training state at {RESUME_PATH}. Run with --train first.")
 
     train, dev = load_training_data(columns_only=True)
+    if LENGTH_BALANCED:
+        train = balance_length(train)
     if "--quick" in sys.argv:  # random subsets, the same every run
         train = train.sample(n=min(QUICK_PAIRS, len(train)), random_state=SEED)
         dev = dev.sample(n=min(QUICK_PAIRS, len(dev)), random_state=SEED)
     print(f"{len(train)} train pairs, {len(dev)} dev pairs, device {DEVICE}")
+
 
     if do_train:
         model = RoBERTa()
