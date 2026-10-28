@@ -14,7 +14,7 @@ There are a few arguments that you can pass to the script:
 So the command to train and test the entire model would be:
 
 ```
-python data/models/roberta/train.py --train --test
+python models/roberta/train.py --train --test
 ```
 
 # Architecture
@@ -52,7 +52,7 @@ context-sensitivity experiment.
 
 After every epoch, the full training state is saved to `resume_checkpoint/`, so an interrupted
 run can be continued with `--resume-training`. The best epoch is saved to `checkpoint/` when
-training finishes. When running `--test` the model will load from there. 
+training finishes. When running `--test` the model will load from there.
 
 # Testing
 
@@ -60,18 +60,19 @@ Running with `--test` loads the saved model from `checkpoint/` (or uses the fres
 when combined with `--train`) and evaluates it on every evaluation set. ]
 
 Here is how you would run just the tests:
+
 ```
 python models/roberta/train.py --test
 ```
 
 ## Evaluation sets
 
-| Set                                 | What it measures                                                                 |
-| ----------------------------------- | -------------------------------------------------------------------------------- |
-| Dev (changemyview)                  | the set used to pick the best epoch, always printed, even without `--test`       |
-| Seen test (changemyview)            | held-out pairs from the subreddit the model was trained on                       |
-| Unseen test (one per subreddit)     | the other 17 SHP subreddits, never trained on, to see if the model generalizes   |
-| Persuasion test (Winning Arguments) | pairs where `labels = 1` if comment A's author earned a delta, not more upvotes  |
+| Set                                 | What it measures                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------- |
+| Dev (changemyview)                  | the set used to pick the best epoch, always printed, even without `--test`      |
+| Seen test (changemyview)            | held-out pairs from the subreddit the model was trained on                      |
+| Unseen test (one per subreddit)     | the other 17 SHP subreddits, never trained on, to see if the model generalizes  |
+| Persuasion test (Winning Arguments) | pairs where `labels = 1` if comment A's author earned a delta, not more upvotes |
 
 The persuasion test asks whether the model learned what makes an argument convincing, or only
 what gets upvoted. Posts that also appear in SHP are dropped from it, so the model has never
